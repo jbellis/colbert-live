@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "colbert-live"
+version = "0.1.0"
+authors = [
+    { name = "Jonathan Ellis", email = "jbellis@gmail.com" },
+]
+description = "ColBERT Live! implements efficient ColBERT search on top of vector indexes that support live updates (without rebuilding the entire index)"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "colbert-ai==0.2.20",
+    "torch>=1.13",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/jbellis/colbert-live"
+"Bug Tracker" = "https://github.com/jbellis/colbert-live/issues"
+
+[tool.setuptools.packages.find]
+include = ["colbert_live*"]
+
+[tool.setuptools.package-data]
+colbert_live = ["py.typed"]

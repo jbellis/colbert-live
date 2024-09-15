@@ -1,0 +1,216 @@
+import math
+from typing import List, Dict, Any, Optional
+from typing import Tuple
+
+import numpy as np
+import torch
+from colbert.indexing.collection_encoder import CollectionEncoder
+from colbert.infra.config import ColBERTConfig
+from colbert.modeling.checkpoint import Checkpoint, pool_embeddings_hierarchical
+from colbert.modeling.colbert import colbert_score_packed
+from sklearn.cluster import AgglomerativeClustering
+
+from .db import DB
+
+
+def _expand(x, a, b, c):
+    """
+    increases x by a factor >= 1 that decays as x increases
+    """
+    if x < 1:
+        return 0
+    return max(x, int(a + b*x + c*x*math.log(x)))
+
+def _pool_query_embeddings(query_embeddings: torch.Tensor, max_distance: float, use_gpu: bool) -> torch.Tensor:
+    # Convert embeddings to numpy for clustering
+    embeddings_np = query_embeddings.cpu().numpy()
+    # Cluster
+    clustering = AgglomerativeClustering(
+        metric='cosine',
+        linkage='average',
+        distance_threshold=max_distance,
+        n_clusters=None
+    )
+    labels = clustering.fit_predict(embeddings_np)
+
+    # Pool the embeddings based on cluster assignments
+    pooled_embeddings = []
+    for label in set(labels):
+        cluster_indices = np.where(labels == label)[0]
+        cluster_embeddings = query_embeddings[cluster_indices]
+        if len(cluster_embeddings) > 1:
+            # average the embeddings in the cluster
+            pooled_embedding = cluster_embeddings.mean(dim=0)
+            if use_gpu:
+                pooled_embedding = pooled_embedding.cuda()
+            # re-normalize the pooled embedding
+            pooled_embedding = pooled_embedding / torch.norm(pooled_embedding, p=2)
+            pooled_embeddings.append(pooled_embedding)
+        else:
+            # only one embedding in the cluster, no need to do extra computation
+            pooled_embeddings.append(cluster_embeddings[0])
+
+    return torch.stack(pooled_embeddings)
+
+class ColbertLive:
+    def __init__(self,
+                 db: DB,
+                 model_name: str = 'answerdotai/answerai-colbert-small-v1',
+                 tokens_per_query: int = 32,
+                 doc_pool_factor: int = 2,
+                 query_pool_distance: float = 0.03
+                 ):
+        """
+        Initialize the ColbertLive instance.
+
+        Args:
+            model_name: The name of the ColBERT model to use.
+            db: The database instance to use for querying and storing embeddings.
+            tokens_per_query: the maximum number of tokens to generate per query.
+            doc_pool_factor (optional): The factor by which to pool document embeddings, as the number of embeddings per cluster.
+                `None` to disable.
+            query_pool_distance (optional): The maximum cosine distance across which to pool query embeddings.
+                `0.0` to disable.
+        """
+        self.db = db
+        self.doc_pool_factor = doc_pool_factor
+        self.query_pool_distance = query_pool_distance
+        self._cf = ColBERTConfig(checkpoint=model_name, query_maxlen=tokens_per_query)
+        self._cp = Checkpoint(self._cf.checkpoint, colbert_config=self._cf)
+        self.encoder = CollectionEncoder(self._cf, self._cp)
+
+    def encode_query(self, q: str) -> torch.Tensor:
+        """
+        Encode a query string into a tensor of embeddings.
+
+        Args:
+            q: The query string to encode.
+
+        Returns:
+            A tensor of query embeddings.
+        """
+        query_embeddings = self._cp.queryFromText([q])[0]  # Get embeddings for a single query
+        if not self.query_pool_distance:
+            result = query_embeddings  # Add batch dimension
+        else:
+            result = _pool_query_embeddings(query_embeddings, self.query_pool_distance, self._cp.use_gpu)  # Add batch dimension
+        return result.unsqueeze(0)
+
+    def encode_chunks(self, chunks: List[str]) -> List[torch.Tensor]:
+        """
+        Encode a batch of document chunks into tensors of embeddings.
+
+        Args:
+            chunks: A list of content strings to encode.
+
+        Performance note: while it is perfectly legitimate to encode a single chunk at a time, this method
+        is designed to support multiple chunks because that means we can dispatch all of that work to the GPU
+        at once.  The overhead of invoking a CUDA kernel is *very* significant, so for an initial bulk load
+        it is much faster to encode in larger batches.  (Corollary: if you are encoding without the benefit of
+        GPU acceleration, then this should not matter very much.)
+
+        Returns:
+            A list of 2D tensors of embeddings, one for each input chunk.
+            Each tensor has shape (num_embeddings, embedding_dim), where num_embeddings is variable (one per token).
+        """
+        # Tokenize and encode the content
+        input_ids, attention_mask = self._cp.doc_tokenizer.tensorize(chunks)
+        D, mask = self._cp.doc(input_ids, attention_mask, keep_dims='return_mask')
+
+        embeddings_list = []
+        for i in range(len(chunks)):
+            # Remove padding and apply mask for each document
+            Di = D[i]
+            maski = mask[i].squeeze(-1).bool()
+            Di = Di[maski]  # Keep only non-padded embeddings
+
+            # Apply pooling if pool_factor > 1
+            if self.doc_pool_factor and self.doc_pool_factor > 1:
+                Di, _ = pool_embeddings_hierarchical(
+                    Di,
+                    [Di.shape[0]],  # Single document length
+                    pool_factor=self.doc_pool_factor,
+                    protected_tokens=0
+                )
+            embeddings_list.append(Di)
+
+        return embeddings_list
+
+    def _load_data_and_construct_tensors(self, chunk_ids: List[Any]) -> Tuple[torch.Tensor, torch.Tensor]:
+        all_embeddings = []
+        lengths = []
+
+        results = self.db.query_chunks(chunk_ids)
+        for embeddings_for_chunk in results:
+            packed_one_chunk = torch.stack(embeddings_for_chunk)
+            all_embeddings.append(packed_one_chunk)
+            lengths.append(packed_one_chunk.shape[0])
+
+        D_packed = torch.cat(all_embeddings)
+        D_lengths = torch.tensor(lengths, dtype=torch.long)
+
+        return D_packed, D_lengths
+
+    MAX_LIMIT = 1000
+
+    def search(self,
+               query: str,
+               k: int = 10,
+               n_ann_docs: Optional[int] = None,
+               n_maxsim_candidates: Optional[int] = None
+               ) -> List[Tuple[Any, float]]:
+        """
+        Perform a ColBERT search and return the top chunk IDs with their scores.
+
+        Args:
+            query: The query string to search for.
+            k: The number of top chunks to return.
+            n_ann_docs: The number of chunks to retrieve for each embedding in the initial ANN search.
+            n_maxsim_candidates: The number of top candidates to consider for full ColBERT scoring
+            after combine the results of the ANN searches.
+
+            If n_ann_docs and/or n_colbert_candidates are not specified, a best guess will be derived
+            from top_k.
+
+        Performance note: search is `O(log n_ann_docs) + O(n_colbert_candidates)`.  (And O(tokens_per_query),
+        if your queries are sufficiently long).  Thus, you can generally afford to overestimate `n_ann_docs`,
+        but you will want to keep `n_colbert_candidates` as low as possible.
+
+        Returns:
+            List[(Any, float)]: A list of tuples of (chunk_id, ColBERT score) for the top k chunks.
+        """
+        if n_ann_docs is None:
+            # f(1) = 105, f(10) = 171, f(100) = 514, f(500) = 998
+            n_ann_docs = _expand(k, 94.9, 11.0, -1.48)
+        if n_maxsim_candidates is None:
+            # f(1) = 9, f(10) = 20, f(100) = 119, f(900) = 1000
+            n_maxsim_candidates = _expand(k, 8.82, 1.13, -0.00471)
+
+        Q = self.encode_query(query)
+        query_encodings = Q[0]
+
+        # compute the max score for each term for each doc
+        chunks_per_query = {}
+        for n, rows in enumerate(self.db.query_ann(query_encodings, n_ann_docs)):
+            for chunk_id, similarity in rows:
+                key = (chunk_id, n)
+                chunks_per_query[key] = max(chunks_per_query.get(key, -1), similarity)
+        if not chunks_per_query:
+            return []  # empty database
+
+        # sum the partial scores and identify the top candidates
+        chunks = {}
+        for (chunk_id, qv), similarity in chunks_per_query.items():
+            chunks[chunk_id] = chunks.get(chunk_id, 0) + similarity
+        candidates = sorted(chunks, key=chunks.get, reverse=True)[:n_maxsim_candidates]
+
+        # Load document encodings
+        D_packed, D_lengths = self._load_data_and_construct_tensors(candidates)
+        # Calculate full ColBERT scores
+        scores = colbert_score_packed(Q, D_packed, D_lengths, config=self._cf)
+
+        # Map the scores back to chunk IDs and sort
+        results = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
+
+        # Convert tensor scores to Python floats and return top k results
+        return [(chunk_id, score.item()) for chunk_id, score in results[:k]]
