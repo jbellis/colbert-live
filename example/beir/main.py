@@ -8,12 +8,17 @@ from beir import util
 from more_itertools import chunked
 from beir.datasets.data_loader import GenericDataLoader
 from beir.retrieval.evaluation import EvaluateRetrieval
-from util import execute_concurrent_async
+from example.util import execute_concurrent_async
 from tqdm import tqdm
 
 from colbert_live import ColbertLive
-from db import AstraDBBeir
+from .db import AstraDBBeir
 
+#
+# Because we're importing `util` from the parent example module, you should run this script
+# from the main colbert-live directory using module syntax:
+# `python -m example.beir.main`
+#
 
 def download_and_load_dataset(dataset) -> Tuple[dict, dict, dict]:
     print("Downloading and loading dataset...")
