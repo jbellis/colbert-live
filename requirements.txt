@@ -1,3 +1,0 @@
-cassandra-driver
-colbert-ai
-torch
