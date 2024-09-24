@@ -1,0 +1,84 @@
+scidocs@48TPQ from keyspace scidocsaaiv1, query pool distance 0.03
+  Time: 194.79 seconds
+  NDCG@1: 0.20800
+  NDCG@5: 0.14381
+  NDCG@10: 0.17154
+  NDCG@100: 0.19202
+scidocs@48TPQ from keyspace scidocsaaiv1pool2, query pool distance 0.03
+  Time: 132.29 seconds
+  NDCG@1: 0.18500
+  NDCG@5: 0.13450
+  NDCG@10: 0.16218
+  NDCG@100: 0.18195
+scifact@48TPQ from keyspace scifactaaiv1, query pool distance 0.03
+  Time: 69.79 seconds
+  NDCG@1: 0.60333
+  NDCG@5: 0.69606
+  NDCG@10: 0.71080
+  NDCG@100: 0.72091
+scifact@48TPQ from keyspace scifactaaiv1pool2, query pool distance 0.03
+  Time: 43.94 seconds
+  NDCG@1: 0.58667
+  NDCG@5: 0.69120
+  NDCG@10: 0.70535
+  NDCG@100: 0.71775
+arguana@64TPQ from keyspace arguanaaaiv1, query pool distance 0.03
+  Time: 327.15 seconds
+  NDCG@1: 0.19275
+  NDCG@5: 0.35591
+  NDCG@10: 0.40434
+  NDCG@100: 0.42970
+arguana@64TPQ from keyspace arguanaaaiv1pool2, query pool distance 0.03
+  Time: 229.58 seconds
+  NDCG@1: 0.16074
+  NDCG@5: 0.30861
+  NDCG@10: 0.36064
+  NDCG@100: 0.38757
+fiqa@32TPQ from keyspace fiqaaaiv1, query pool distance 0.03
+  Time: 113.78 seconds
+  NDCG@1: 0.37809
+  NDCG@5: 0.33804
+  NDCG@10: 0.35125
+  NDCG@100: 0.35976
+fiqa@32TPQ from keyspace fiqaaaiv1pool2, query pool distance 0.03
+  Time: 73.82 seconds
+  NDCG@1: 0.39043
+  NDCG@5: 0.34481
+  NDCG@10: 0.35799
+  NDCG@100: 0.36676
+nfcorpus@32TPQ from keyspace nfcorpusaaiv1, query pool distance 0.03
+  Time: 78.54 seconds
+  NDCG@1: 0.44118
+  NDCG@5: 0.35135
+  NDCG@10: 0.30944
+  NDCG@100: 0.20997
+nfcorpus@32TPQ from keyspace nfcorpusaaiv1pool2, query pool distance 0.03
+  Time: 46.87 seconds
+  NDCG@1: 0.41950
+  NDCG@5: 0.35293
+  NDCG@10: 0.30865
+  NDCG@100: 0.20902
+trec-covid@48TPQ from keyspace treccovidaaiv1, query pool distance 0.03
+  Time: 11.01 seconds
+  NDCG@1: 0.85000
+  NDCG@5: 0.75830
+  NDCG@10: 0.69069
+  NDCG@100: 0.19021
+trec-covid@48TPQ from keyspace treccovidaaiv1pool2, query pool distance 0.03
+  Time: 7.47 seconds
+  NDCG@1: 0.87000
+  NDCG@5: 0.77130
+  NDCG@10: 0.71444
+  NDCG@100: 0.20247
+quora @ 32 TPQ from keyspace quoraaaiv1, query pool distance 0.03
+  Time: 583.54 seconds
+  NDCG@1: 0.78250
+  NDCG@5: 0.84050
+  NDCG@10: 0.85250
+  NDCG@100: 0.85624
+quora @ 32 TPQ from keyspace quoraaaiv1pool2, query pool distance 0.03
+  Time: 529.64 seconds
+  NDCG@1: 0.72360
+  NDCG@5: 0.79593
+  NDCG@10: 0.81140
+  NDCG@100: 0.81644

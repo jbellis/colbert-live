@@ -108,16 +108,17 @@ def evaluate_model(qrels: dict, results: dict):
 
 def test_all():
     for dataset, tokens_per_query in [
-        ('scifact', 48),
-        ('nfcorpus', 32),
-        ('scidocs', 48),
-        ('trec-covid', 48),
-        ('fiqa', 32),
-        ('arguana', 64),
-        ('quora', 32)
-        ('hotpotqa', 32)
+        ('webis-touche2020', 32),
+        # ('scifact', 48),
+        # ('nfcorpus', 32),
+        # ('scidocs', 48),
+        # ('trec-covid', 48),
+        # ('fiqa', 32),
+        # ('arguana', 64),
+        # ('quora', 32)
+        # ('hotpotqa', 32)
     ]:
-        for doc_pool_factor in [1, 2]:
+        for doc_pool_factor in [2]:
             model_name = 'answerdotai/answerai-colbert-small-v1'
             ks_name = dataset.replace('-', '') + 'aaiv1'
             if doc_pool_factor > 1:
@@ -129,8 +130,8 @@ def test_all():
             compute_and_store_embeddings(corpus, db, colbert_live)
 
             for query_pool_distance in [0.03]:
-                for n_ann_docs in [120, 240, 360]:
-                    for n_maxsim_candidates in [20, 40, 80]:
+                for n_ann_docs in [240]:
+                    for n_maxsim_candidates in [20]:
                         print(f'{dataset} @ {tokens_per_query} TPQ from keyspace {ks_name}, query pool distance {query_pool_distance}, CL {n_ann_docs}:{n_maxsim_candidates}')
 
                         colbert_live = ColbertLive(db, model_name, query_pool_distance=query_pool_distance,
