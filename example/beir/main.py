@@ -92,7 +92,7 @@ def search_and_benchmark(queries: dict, n_ann_docs: int, n_colbert_candidates: i
         results = dict(tqdm(executor.map(search, queries.items()), total=len(queries), desc="Retrieving"))
     end_time = time.time()
 
-    print(f"  Time: {end_time - start_time:.2f} seconds")
+    print(f"  Time: {end_time - start_time:.2f} seconds = {len(queries) / (end_time - start_time):.2f} QPS")
     return results
 
 
@@ -108,56 +108,37 @@ def evaluate_model(qrels: dict, results: dict):
 
 def test_all():
     for dataset, tokens_per_query in [
-        ('scidocs', 48),
         ('scifact', 48),
-        ('arguana', 64),
-        ('fiqa', 32),
         ('nfcorpus', 32),
+        ('scidocs', 48),
         ('trec-covid', 48),
+        ('fiqa', 32),
+        ('arguana', 64),
         ('quora', 32)
-        # ('hotpotqa', 32)
+        ('hotpotqa', 32)
     ]:
-        print(f'{dataset} @{tokens_per_query} tokens per query')
-        model_name = 'answerdotai/answerai-colbert-small-v1'
-        doc_pool_factor = 2
-        ks_name = dataset.replace('-', '') + 'aaiv1'
-        if doc_pool_factor > 1:
-            ks_name += f'pool{doc_pool_factor}'
-        db = AstraDBBeir(ks_name, model_name, os.environ.get('ASTRA_DB_ID'), os.environ.get('ASTRA_DB_TOKEN'))
+        for doc_pool_factor in [1, 2]:
+            model_name = 'answerdotai/answerai-colbert-small-v1'
+            ks_name = dataset.replace('-', '') + 'aaiv1'
+            if doc_pool_factor > 1:
+                ks_name += f'pool{doc_pool_factor}'
+            db = AstraDBBeir(ks_name, model_name, os.environ.get('ASTRA_DB_ID'), os.environ.get('ASTRA_DB_TOKEN'))
 
-        colbert_live = ColbertLive(db, model_name, doc_pool_factor=doc_pool_factor)
-        corpus, queries, qrels = download_and_load_dataset(dataset)
-        compute_and_store_embeddings(corpus, db, colbert_live)
+            colbert_live = ColbertLive(db, model_name, doc_pool_factor=doc_pool_factor)
+            corpus, queries, qrels = download_and_load_dataset(dataset)
+            compute_and_store_embeddings(corpus, db, colbert_live)
 
-        n_ann_docs, n_colbert_candidates, query_pool_distance = 240, 20, 0.00
-        # print(f"ANN,COLBERT: {n_ann_docs}, {n_colbert_candidates}, {query_pool_distance}")
-        # reinitialize with the correct query parameters, apologies for the clunkiness
-        colbert_live = ColbertLive(db, model_name, query_pool_distance=query_pool_distance, tokens_per_query=tokens_per_query)
-        results = search_and_benchmark(queries, n_ann_docs, n_colbert_candidates, colbert_live)
-        evaluation_results = evaluate_model(qrels, results)
-        for k, score in evaluation_results.items():
-            print(f"  {k}: {score:.5f}")
+            for query_pool_distance in [0.03]:
+                for n_ann_docs in [120, 240, 360]:
+                    for n_maxsim_candidates in [20, 40, 80]:
+                        print(f'{dataset} @ {tokens_per_query} TPQ from keyspace {ks_name}, query pool distance {query_pool_distance}, CL {n_ann_docs}:{n_maxsim_candidates}')
 
-def test_one():
-    dataset, tokens_per_query = 'scifact', 32
-    print(f'{dataset} @{tokens_per_query} tokens per query')
-    model_name = 'answerdotai/answerai-colbert-small-v1'
-    db = AstraDBBeir('scifactuncompacted', model_name, os.environ.get('ASTRA_DB_ID'), os.environ.get('ASTRA_DB_TOKEN'))
-
-    doc_pool_factor = 1
-    colbert_live = ColbertLive(db, model_name, doc_pool_factor=doc_pool_factor)
-    corpus, queries, qrels = download_and_load_dataset(dataset)
-    compute_and_store_embeddings(corpus, db, colbert_live)
-
-    n_ann_docs, query_pool_distance = 240, 0.03
-    for n_colbert_candidates in [20]:
-        print(f"ANN,COLBERT: {n_ann_docs}, {n_colbert_candidates}, {query_pool_distance}")
-        # reinitialize with the correct query parameters, apologies for the clunkiness
-        colbert_live = ColbertLive(db, model_name, query_pool_distance=query_pool_distance, tokens_per_query=tokens_per_query)
-        results = search_and_benchmark(queries, n_ann_docs, n_colbert_candidates, colbert_live)
-        evaluation_results = evaluate_model(qrels, results)
-        for k, score in evaluation_results.items():
-            print(f"  {k}: {score:.5f}")
+                        colbert_live = ColbertLive(db, model_name, query_pool_distance=query_pool_distance,
+                                                   tokens_per_query=tokens_per_query)
+                        results = search_and_benchmark(queries, n_ann_docs, n_maxsim_candidates, colbert_live)
+                        evaluation_results = evaluate_model(qrels, results)
+                        for k, score in evaluation_results.items():
+                            print(f"  {k}: {score:.5f}")
 
 
 if __name__ == "__main__":
