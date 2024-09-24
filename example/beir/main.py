@@ -89,7 +89,7 @@ def compute_and_store_embeddings(corpus: dict, db, colbert_live):
 
     with multiprocessing.Pool(processes=num_processes) as pool:
         tasks = [
-            pool.apply_async(process_document_range, (0, len(list(range_items)), list(range_items), db_params, colbert_live.model_name))
+            pool.apply_async(process_document_range, (0, len(list(range_items)), list(range_items), db_params, model_name))
             for range_items in ranges
         ]
         for task in tqdm(tasks, total=num_processes, desc="Processing document ranges"):
