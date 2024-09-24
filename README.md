@@ -45,7 +45,13 @@ Here's the code from the `cmdline` example, which implements adding and searchin
 
 ```python
 class CmdlineDB(AstraDB):
-    # see cmdline/db.py for details
+    def prepare(self, embedding_dim: int):
+        self.query_ann_stmt = ...
+        self.query_chunks_stmt = ...
+    def process_ann_rows(self, result: ResultSet) -> list[tuple[Any, float]]:
+        ...
+    def process_chunk_rows(self, result: ResultSet) -> list[torch.Tensor]:
+        ...
 
 def add_document(db, colbert_live, title, chunks):
     doc_id = db.add_document(title, chunks)
