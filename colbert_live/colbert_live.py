@@ -66,11 +66,15 @@ class ColbertLive:
         Args:
             model_name: The name of the ColBERT model to use.
             db: The database instance to use for querying and storing embeddings.
-            tokens_per_query: the maximum number of tokens to generate per query.
+            tokens_per_query (optional): the maximum number of tokens to generate per query.
             doc_pool_factor (optional): The factor by which to pool document embeddings, as the number of embeddings per cluster.
                 `None` to disable.
             query_pool_distance (optional): The maximum cosine distance across which to pool query embeddings.
                 `0.0` to disable.
+
+            doc_pool_factor is only used by encode_chunks.
+
+            query_pool_distance and tokens_per_query are only used by search and encode_query.
         """
         self.db = db
         self.doc_pool_factor = doc_pool_factor
