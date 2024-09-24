@@ -1,11 +1,12 @@
 import os
 import time
+import multiprocessing
 from concurrent.futures import ThreadPoolExecutor
 from itertools import cycle
 from typing import Dict, Tuple, List
 
 from beir import util
-from more_itertools import chunked
+from more_itertools import chunked, divide
 from beir.datasets.data_loader import GenericDataLoader
 from beir.retrieval.evaluation import EvaluateRetrieval
 from example.util import execute_concurrent_async
@@ -61,6 +62,13 @@ def is_populated(db):
     result = db.session.execute(f"SELECT * FROM {db.keyspace}.chunks LIMIT 1")
     return result.one() is not None
 
+def process_document_range(start_idx: int, end_idx: int, range_items: List[Tuple[str, Dict]], db_params: Dict, model_name: str):
+    db = AstraDBBeir(db_params['keyspace'], model_name, db_params['astra_db_id'], db_params['astra_token'])
+    colbert_live = ColbertLive(db, model_name)
+    
+    for doc_batch in chunked(range_items, 32):
+        process_document_batch(doc_batch, db, colbert_live)
+
 def compute_and_store_embeddings(corpus: dict, db, colbert_live):
     if is_populated(db):
         print("The chunks table is not empty. Skipping encoding and insertion.")
@@ -68,14 +76,24 @@ def compute_and_store_embeddings(corpus: dict, db, colbert_live):
 
     print("Encoding and inserting documents...")
     start_time = time.time()
-    
-    batch_size = 32
-    insert_future = None
-    for doc_batch in tqdm(chunked(corpus.items(), batch_size), total=len(corpus)//batch_size + 1, desc="Encoding and inserting"):
-        next_insert_future = process_document_batch(doc_batch, db, colbert_live)
-        if insert_future:
-            insert_future.result() # wait for previous batch before inserting the next
-        insert_future = next_insert_future
+
+    num_processes = multiprocessing.cpu_count()
+    corpus_items = list(corpus.items())
+    ranges = list(divide(num_processes, corpus_items))
+
+    db_params = {
+        'keyspace': db.keyspace,
+        'astra_db_id': os.environ.get('ASTRA_DB_ID'),
+        'astra_token': os.environ.get('ASTRA_DB_TOKEN')
+    }
+
+    with multiprocessing.Pool(processes=num_processes) as pool:
+        tasks = [
+            pool.apply_async(process_document_range, (0, len(range_items), range_items, db_params, colbert_live.model_name))
+            for range_items in ranges
+        ]
+        for task in tqdm(tasks, total=num_processes, desc="Processing document ranges"):
+            task.get()  # This will raise an exception if the task failed
 
     end_time = time.time()
     print(f"Encoding and insertion completed. Time taken: {end_time - start_time:.2f} seconds")
@@ -109,16 +127,15 @@ def evaluate_model(qrels: dict, results: dict):
 def test_all():
     for dataset, tokens_per_query in [
         ('webis-touche2020', 32),
-        # ('scifact', 48),
-        # ('nfcorpus', 32),
-        # ('scidocs', 48),
-        # ('trec-covid', 48),
-        # ('fiqa', 32),
-        # ('arguana', 64),
-        # ('quora', 32)
-        # ('hotpotqa', 32)
+        ('scifact', 48),
+        ('nfcorpus', 32),
+        ('scidocs', 48),
+        ('trec-covid', 48),
+        ('fiqa', 32),
+        ('arguana', 64),
+        ('quora', 32)
     ]:
-        for doc_pool_factor in [1, 2]:
+        for doc_pool_factor in [1, 2, 3, 4]:
             model_name = 'answerdotai/answerai-colbert-small-v1'
             ks_name = dataset.replace('-', '') + 'aaiv1'
             if doc_pool_factor > 1:
@@ -128,18 +145,6 @@ def test_all():
             colbert_live = ColbertLive(db, model_name, doc_pool_factor=doc_pool_factor)
             corpus, queries, qrels = download_and_load_dataset(dataset)
             compute_and_store_embeddings(corpus, db, colbert_live)
-
-            for query_pool_distance in [0.03]:
-                for n_ann_docs in [240]:
-                    for n_maxsim_candidates in [20]:
-                        print(f'{dataset} @ {tokens_per_query} TPQ from keyspace {ks_name}, query pool distance {query_pool_distance}, CL {n_ann_docs}:{n_maxsim_candidates}')
-
-                        colbert_live = ColbertLive(db, model_name, query_pool_distance=query_pool_distance,
-                                                   tokens_per_query=tokens_per_query)
-                        results = search_and_benchmark(queries, n_ann_docs, n_maxsim_candidates, colbert_live)
-                        evaluation_results = evaluate_model(qrels, results)
-                        for k, score in evaluation_results.items():
-                            print(f"  {k}: {score:.5f}")
 
 
 if __name__ == "__main__":
