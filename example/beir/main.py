@@ -66,7 +66,7 @@ def process_document_range(start_idx: int, end_idx: int, range_items: List[Tuple
     db = AstraDBBeir(db_params['keyspace'], model_name, db_params['astra_db_id'], db_params['astra_token'])
     colbert_live = ColbertLive(db, model_name)
     
-    for doc_batch in chunked(range_items, 32):
+    for doc_batch in chunked(range_items[start_idx:end_idx], 32):
         process_document_batch(doc_batch, db, colbert_live)
 
 def compute_and_store_embeddings(corpus: dict, db, colbert_live, model_name: str):
@@ -88,10 +88,13 @@ def compute_and_store_embeddings(corpus: dict, db, colbert_live, model_name: str
     }
 
     with multiprocessing.Pool(processes=num_processes) as pool:
-        tasks = [
-            pool.apply_async(process_document_range, (0, len(list(range_items)), list(range_items), db_params, model_name))
-            for range_items in ranges
-        ]
+        tasks = []
+        start_idx = 0
+        for range_items in ranges:
+            end_idx = start_idx + len(list(range_items))
+            tasks.append(pool.apply_async(process_document_range, (start_idx, end_idx, corpus_items, db_params, model_name)))
+            start_idx = end_idx
+        
         for task in tqdm(tasks, total=num_processes, desc="Processing document ranges"):
             task.get()  # This will raise an exception if the task failed
 
