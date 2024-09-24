@@ -86,6 +86,14 @@ def main():
         search_documents(db, colbert_live, args.query, args.k)
 ```
 
+## Supported databases
+
+ColBERT Live! initially supports [DataStax Astra](https://www.datastax.com/products/astra) out of the box.
+Adding support for other databases is straightforward; check out 
+[the Astra implementation](https://github.com/jbellis/colbert-live/blob/master/colbert_live/db/astra.py) 
+for an example to follow.  If you're not concerned about making it reusable, you just have to implement
+[the two methods of the base DB class](https://github.com/jbellis/colbert-live/blob/master/colbert_live/db/db.py).
+
 ## License
 
 This project is licensed under the Apache License 2.0. See the [LICENSE](LICENSE.txt) file for details.
