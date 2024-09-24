@@ -69,7 +69,7 @@ def process_document_range(start_idx: int, end_idx: int, range_items: List[Tuple
     for doc_batch in chunked(range_items, 32):
         process_document_batch(doc_batch, db, colbert_live)
 
-def compute_and_store_embeddings(corpus: dict, db, colbert_live):
+def compute_and_store_embeddings(corpus: dict, db, colbert_live, model_name: str):
     if is_populated(db):
         print("The chunks table is not empty. Skipping encoding and insertion.")
         return
@@ -144,7 +144,7 @@ def test_all():
 
             colbert_live = ColbertLive(db, model_name, doc_pool_factor=doc_pool_factor)
             corpus, queries, qrels = download_and_load_dataset(dataset)
-            compute_and_store_embeddings(corpus, db, colbert_live)
+            compute_and_store_embeddings(corpus, db, colbert_live, model_name)
 
 
 if __name__ == "__main__":
