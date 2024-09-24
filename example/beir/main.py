@@ -62,14 +62,14 @@ def is_populated(db):
     result = db.session.execute(f"SELECT * FROM {db.keyspace}.chunks LIMIT 1")
     return result.one() is not None
 
-def process_document_range(start_idx: int, end_idx: int, range_items: List[Tuple[str, Dict]], db_params: Dict, model_name: str):
+def process_document_range(start_idx: int, end_idx: int, range_items: List[Tuple[str, Dict]], db_params: Dict, model_name: str, doc_pool_factor: int):
     db = AstraDBBeir(db_params['keyspace'], model_name, db_params['astra_db_id'], db_params['astra_token'])
-    colbert_live = ColbertLive(db, model_name)
+    colbert_live = ColbertLive(db, model_name, doc_pool_factor=doc_pool_factor)
     
     for doc_batch in chunked(range_items[start_idx:end_idx], 32):
         process_document_batch(doc_batch, db, colbert_live)
 
-def compute_and_store_embeddings(corpus: dict, db, colbert_live, model_name: str):
+def compute_and_store_embeddings(corpus: dict, db, model_name: str, doc_pool_factor):
     if is_populated(db):
         print("The chunks table is not empty. Skipping encoding and insertion.")
         return
@@ -92,7 +92,7 @@ def compute_and_store_embeddings(corpus: dict, db, colbert_live, model_name: str
         start_idx = 0
         for range_items in ranges:
             end_idx = start_idx + len(list(range_items))
-            tasks.append(pool.apply_async(process_document_range, (start_idx, end_idx, corpus_items, db_params, model_name)))
+            tasks.append(pool.apply_async(process_document_range, (start_idx, end_idx, corpus_items, db_params, model_name, doc_pool_factor)))
             start_idx = end_idx
         
         for task in tqdm(tasks, total=num_processes, desc="Processing document ranges"):
@@ -145,9 +145,8 @@ def test_all():
                 ks_name += f'pool{doc_pool_factor}'
             db = AstraDBBeir(ks_name, model_name, os.environ.get('ASTRA_DB_ID'), os.environ.get('ASTRA_DB_TOKEN'))
 
-            colbert_live = ColbertLive(db, model_name, doc_pool_factor=doc_pool_factor)
             corpus, queries, qrels = download_and_load_dataset(dataset)
-            compute_and_store_embeddings(corpus, db, colbert_live, model_name)
+            compute_and_store_embeddings(corpus, db, model_name, doc_pool_factor)
 
 
 if __name__ == "__main__":
