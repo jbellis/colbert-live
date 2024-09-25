@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 from colbert_live import ColbertLive
 from .db import AstraDBBeir
+import time
 
 #
 # Because we're importing `util` from the parent example module, you should run this script
@@ -57,12 +58,23 @@ def process_document_batch(batch: List[Tuple[str, Dict]], db, colbert_live):
     return execute_concurrent_async(db.session, chunk_stmt_with_parms + embeddings_stmt_with_parms)
 
 
+def connect(db_params: Dict, model_name: str):
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            return AstraDBBeir(db_params['keyspace'], model_name, db_params['astra_db_id'], db_params['astra_token'])
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise
+            print(f"Connection attempt {attempt + 1} failed. Retrying in 5 seconds...")
+            time.sleep(5)
+
 def is_populated(db):
     result = db.session.execute(f"SELECT * FROM {db.keyspace}.chunks LIMIT 1")
     return result.one() is not None
 
 def process_document_range(start_idx: int, end_idx: int, range_items: List[Tuple[str, Dict]], db_params: Dict, model_name: str, doc_pool_factor: int):
-    db = AstraDBBeir(db_params['keyspace'], model_name, db_params['astra_db_id'], db_params['astra_token'])
+    db = connect(db_params, model_name)
     colbert_live = ColbertLive(db, model_name, doc_pool_factor=doc_pool_factor)
     
     for doc_batch in chunked(range_items[start_idx:end_idx], 32):
@@ -104,7 +116,7 @@ def compute_and_store_embeddings(corpus: dict, db, model_name: str, doc_pool_fac
 
 
 def search_range(start_idx: int, end_idx: int, query_items: List[Tuple[str, str]], db_params: Dict, model_name: str, n_ann_docs: int, n_colbert_candidates: int, query_pool_distance: float, tokens_per_query: int) -> Dict[str, Dict[str, float]]:
-    db = AstraDBBeir(db_params['keyspace'], model_name, db_params['astra_db_id'], db_params['astra_token'])
+    db = connect(db_params, model_name)
     colbert_live = ColbertLive(db, model_name, query_pool_distance=query_pool_distance, tokens_per_query=tokens_per_query)
     
     results = {}
@@ -170,7 +182,12 @@ def test_all():
             ks_name = dataset.replace('-', '') + 'aaiv1'
             if doc_pool_factor > 1:
                 ks_name += f'pool{doc_pool_factor}'
-            db = AstraDBBeir(ks_name, model_name, os.environ.get('ASTRA_DB_ID'), os.environ.get('ASTRA_DB_TOKEN'))
+            db_params = {
+                'keyspace': ks_name,
+                'astra_db_id': os.environ.get('ASTRA_DB_ID'),
+                'astra_token': os.environ.get('ASTRA_DB_TOKEN')
+            }
+            db = connect(db_params, model_name)
 
             corpus, queries, qrels = download_and_load_dataset(dataset)
             compute_and_store_embeddings(corpus, db, model_name, doc_pool_factor)
