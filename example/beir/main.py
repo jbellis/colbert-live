@@ -1,9 +1,9 @@
 import os
 import time
 import multiprocessing
-from concurrent.futures import ThreadPoolExecutor
 from itertools import cycle
 from typing import Dict, Tuple, List
+from more_itertools import divide
 
 from beir import util
 from more_itertools import chunked, divide
@@ -102,17 +102,41 @@ def compute_and_store_embeddings(corpus: dict, db, model_name: str, doc_pool_fac
     print(f"Encoding and insertion completed. Time taken: {end_time - start_time:.2f} seconds")
 
 
-def search_and_benchmark(queries: dict, n_ann_docs: int, n_colbert_candidates: int, colbert_live: ColbertLive) -> Dict[str, Dict[str, float]]:
-    def search(query_item: Tuple[str, str]) -> Tuple[str, Dict[str, float]]:
-        query_id, query = query_item
-        return (query_id, dict(colbert_live.search(query, n_colbert_candidates, n_ann_docs, n_colbert_candidates)))
+def search_range(start_idx: int, end_idx: int, query_items: List[Tuple[str, str]], db_params: Dict, model_name: str, n_ann_docs: int, n_colbert_candidates: int, query_pool_distance: float, tokens_per_query: int) -> Dict[str, Dict[str, float]]:
+    db = AstraDBBeir(db_params['keyspace'], model_name, db_params['astra_db_id'], db_params['astra_token'])
+    colbert_live = ColbertLive(db, model_name, query_pool_distance=query_pool_distance, tokens_per_query=tokens_per_query)
+    
+    results = {}
+    for query_id, query in query_items[start_idx:end_idx]:
+        results[query_id] = dict(colbert_live.search(query, n_colbert_candidates, n_ann_docs, n_colbert_candidates))
+    return results
 
+def search_and_benchmark(queries: dict, n_ann_docs: int, n_colbert_candidates: int, db: AstraDBBeir, model_name: str, query_pool_distance: float, tokens_per_query: int) -> Dict[str, Dict[str, float]]:
     start_time = time.time()
-    num_threads = 8
-    with ThreadPoolExecutor(max_workers=num_threads) as executor:
-        results = dict(tqdm(executor.map(search, queries.items()), total=len(queries), desc="Retrieving"))
-    end_time = time.time()
 
+    num_processes = multiprocessing.cpu_count()
+    query_items = list(queries.items())
+    ranges = list(divide(num_processes, query_items))
+
+    db_params = {
+        'keyspace': db.keyspace,
+        'astra_db_id': os.environ.get('ASTRA_DB_ID'),
+        'astra_token': os.environ.get('ASTRA_DB_TOKEN')
+    }
+
+    with multiprocessing.Pool(processes=num_processes) as pool:
+        tasks = []
+        start_idx = 0
+        for range_items in ranges:
+            end_idx = start_idx + len(list(range_items))
+            tasks.append(pool.apply_async(search_range, (start_idx, end_idx, query_items, db_params, model_name, n_ann_docs, n_colbert_candidates, query_pool_distance, tokens_per_query)))
+            start_idx = end_idx
+        
+        results = {}
+        for task in tqdm(tasks, total=num_processes, desc="Retrieving"):
+            results.update(task.get())
+
+    end_time = time.time()
     print(f"  Time: {end_time - start_time:.2f} seconds = {len(queries) / (end_time - start_time):.2f} QPS")
     return results
 
@@ -153,9 +177,7 @@ def test_all():
                     for n_maxsim_candidates in [20, 40, 60, 80]:
                         print(f'{dataset} @ {tokens_per_query} TPQ from keyspace {ks_name}, query pool distance {query_pool_distance}, CL {n_ann_docs}:{n_maxsim_candidates}')
 
-                        colbert_live = ColbertLive(db, model_name, query_pool_distance=query_pool_distance,
-                                                   tokens_per_query=tokens_per_query)
-                        results = search_and_benchmark(queries, n_ann_docs, n_maxsim_candidates, colbert_live)
+                        results = search_and_benchmark(queries, n_ann_docs, n_maxsim_candidates, db, model_name, query_pool_distance, tokens_per_query)
                         evaluation_results = evaluate_model(qrels, results)
                         for k, score in evaluation_results.items():
                             print(f"  {k}: {score:.5f}")
