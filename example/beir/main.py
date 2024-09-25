@@ -129,14 +129,14 @@ def evaluate_model(qrels: dict, results: dict):
 
 def test_all():
     for dataset, tokens_per_query in [
-        ('webis-touche2020', 32),
+        ('fiqa', 32),
         ('scifact', 48),
         ('nfcorpus', 32),
         ('scidocs', 48),
         ('trec-covid', 48),
-        ('fiqa', 32),
         ('arguana', 64),
-        ('quora', 32)
+        ('quora', 32),
+        ('webis-touche2020', 32),
     ]:
         for doc_pool_factor in [1, 2, 3, 4]:
             model_name = 'answerdotai/answerai-colbert-small-v1'
@@ -147,6 +147,18 @@ def test_all():
 
             corpus, queries, qrels = download_and_load_dataset(dataset)
             compute_and_store_embeddings(corpus, db, model_name, doc_pool_factor)
+
+            for query_pool_distance in [0.03]:
+                for n_ann_docs in [120, 240, 360]:
+                    for n_maxsim_candidates in [20, 40, 60, 80]:
+                        print(f'{dataset} @ {tokens_per_query} TPQ from keyspace {ks_name}, query pool distance {query_pool_distance}, CL {n_ann_docs}:{n_maxsim_candidates}')
+
+                        colbert_live = ColbertLive(db, model_name, query_pool_distance=query_pool_distance,
+                                                   tokens_per_query=tokens_per_query)
+                        results = search_and_benchmark(queries, n_ann_docs, n_maxsim_candidates, colbert_live)
+                        evaluation_results = evaluate_model(qrels, results)
+                        for k, score in evaluation_results.items():
+                            print(f"  {k}: {score:.5f}")
 
 
 if __name__ == "__main__":
