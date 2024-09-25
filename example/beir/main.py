@@ -3,10 +3,9 @@ import time
 import multiprocessing
 from itertools import cycle
 from typing import Dict, Tuple, List
-from more_itertools import divide
 
 from beir import util
-from more_itertools import chunked, divide
+from more_itertools import chunked
 from beir.datasets.data_loader import GenericDataLoader
 from beir.retrieval.evaluation import EvaluateRetrieval
 from example.util import execute_concurrent_async
@@ -79,7 +78,9 @@ def compute_and_store_embeddings(corpus: dict, db, model_name: str, doc_pool_fac
 
     num_processes = multiprocessing.cpu_count()
     corpus_items = list(corpus.items())
-    ranges = list(divide(num_processes, corpus_items))
+    total_items = len(corpus_items)
+    items_per_process = total_items // num_processes
+    remainder = total_items % num_processes
 
     db_params = {
         'keyspace': db.keyspace,
@@ -90,8 +91,8 @@ def compute_and_store_embeddings(corpus: dict, db, model_name: str, doc_pool_fac
     with multiprocessing.Pool(processes=num_processes) as pool:
         tasks = []
         start_idx = 0
-        for range_items in ranges:
-            end_idx = start_idx + len(list(range_items))
+        for i in range(num_processes):
+            end_idx = start_idx + items_per_process + (1 if i < remainder else 0)
             tasks.append(pool.apply_async(process_document_range, (start_idx, end_idx, corpus_items, db_params, model_name, doc_pool_factor)))
             start_idx = end_idx
         
@@ -116,7 +117,9 @@ def search_and_benchmark(queries: dict, n_ann_docs: int, n_colbert_candidates: i
 
     num_processes = multiprocessing.cpu_count()
     query_items = list(queries.items())
-    ranges = list(divide(num_processes, query_items))
+    total_queries = len(query_items)
+    queries_per_process = total_queries // num_processes
+    remainder = total_queries % num_processes
 
     db_params = {
         'keyspace': db.keyspace,
@@ -127,8 +130,8 @@ def search_and_benchmark(queries: dict, n_ann_docs: int, n_colbert_candidates: i
     with multiprocessing.Pool(processes=num_processes) as pool:
         tasks = []
         start_idx = 0
-        for range_items in ranges:
-            end_idx = start_idx + len(list(range_items))
+        for i in range(num_processes):
+            end_idx = start_idx + queries_per_process + (1 if i < remainder else 0)
             tasks.append(pool.apply_async(search_range, (start_idx, end_idx, query_items, db_params, model_name, n_ann_docs, n_colbert_candidates, query_pool_distance, tokens_per_query)))
             start_idx = end_idx
         
