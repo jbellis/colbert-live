@@ -59,6 +59,7 @@ def process_document_batch(batch: List[Tuple[str, Dict]], db, colbert_live):
 
 
 def connect(db_params: Dict, model_name: str):
+    # multiprocessing will slam the db with all the connection attempts at once, so we'll retry a few times
     max_retries = 5
     for attempt in range(max_retries):
         try:
@@ -168,8 +169,8 @@ def evaluate_model(qrels: dict, results: dict):
 
 def test_all():
     for dataset, tokens_per_query in [
-        ('fiqa', 32),
         ('scifact', 48),
+        ('fiqa', 32),
         ('nfcorpus', 32),
         ('scidocs', 48),
         ('trec-covid', 48),
