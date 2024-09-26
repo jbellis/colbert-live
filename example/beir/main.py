@@ -135,7 +135,6 @@ def test_all(datasets):
 
 if __name__ == "__main__":
     all_datasets = [
-        ('webis-touche2020', 32),
         ('scifact', 48),
         ('nfcorpus', 32),
         ('scidocs', 48),
@@ -143,12 +142,17 @@ if __name__ == "__main__":
         ('fiqa', 32),
         ('arguana', 64),
         ('quora', 32),
-        ('hotpotqa', 32)
     ]
 
     if len(sys.argv) > 1:
         dataset_dict = {name: tpq for name, tpq in all_datasets}
-        datasets_to_run = [(name, dataset_dict[name]) for name in all_datasets if name in dataset_dict]
+        requested_datasets = sys.argv[1:]
+        datasets_to_run = [(name, dataset_dict[name]) for name in requested_datasets if name in dataset_dict]
+        unrecognized_datasets = [name for name in requested_datasets if name not in dataset_dict]
+        if unrecognized_datasets:
+            print(f"Skipping unrecognized datasets: {', '.join(unrecognized_datasets)}")
     else:
         datasets_to_run = all_datasets
+    
+    print(f"Testing datasets: {', '.join(name for name, _ in datasets_to_run)}")
     test_all(datasets_to_run)
