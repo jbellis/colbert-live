@@ -47,9 +47,18 @@ class Model(ABC):
     def dim(self):
         pass
 
+    @staticmethod
+    def from_name_or_path(name_or_path: str, **kwargs):
+        if 'colbert' in name_or_path.lower():
+            return ColbertModel(name_or_path, **kwargs)
+        elif 'colpali' in name_or_path.lower():
+            return ColpaliModel(name_or_path)
+        else:
+            raise ValueError(f"Unknown model: {name_or_path}. You can manually instantiate an instance of ColbertModel or ColpaliModel.")
+
 
 class ColbertModel(Model):
-    def __init__(self, model_name: str, tokens_per_query: int):
+    def __init__(self, model_name: str, tokens_per_query: int = 32):
         self.config = ColBERTConfig(checkpoint=model_name, query_maxlen=tokens_per_query)
         self.checkpoint = Checkpoint(self.config.checkpoint, colbert_config=self.config)
         self.encoder = CollectionEncoder(self.config, self.checkpoint)
@@ -79,7 +88,7 @@ class ColbertModel(Model):
         return self.config.dim
 
 
-class ColPaliModel(Model):
+class ColpaliModel(Model):
     def __init__(self, model_name: str, device: str = "cuda"):
         self.device = device
         self.colpali = ColPali.from_pretrained(
@@ -88,9 +97,6 @@ class ColPaliModel(Model):
             device_map="cuda" if device == "cuda" else None,
         ).eval()
         self.processor = ColPaliProcessor.from_pretrained(model_name)
-
-        if device != "cuda":
-            self.colpali = self.colpali.to(device)
 
     def encode_query(self, q: str) -> torch.Tensor:
         with torch.no_grad():
