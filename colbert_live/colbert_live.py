@@ -4,13 +4,12 @@ from typing import Tuple
 
 import numpy as np
 import torch
-from colbert.indexing.collection_encoder import CollectionEncoder
-from colbert.infra.config import ColBERTConfig
-from colbert.modeling.checkpoint import Checkpoint, pool_embeddings_hierarchical
+from colbert.modeling.checkpoint import pool_embeddings_hierarchical
 from colbert.modeling.colbert import colbert_score_packed
 from sklearn.cluster import AgglomerativeClustering
 
 from .db import DB
+from .models import ColbertModel
 
 
 def _expand(x, a, b, c):
@@ -53,53 +52,6 @@ def _pool_query_embeddings(query_embeddings: torch.Tensor, max_distance: float, 
     return torch.stack(pooled_embeddings)
 
 
-class Model:
-    def __init__(self, model_name: str, tokens_per_query: int):
-        self.config = ColBERTConfig(checkpoint=model_name, query_maxlen=tokens_per_query)
-        self.checkpoint = Checkpoint(self.config.checkpoint, colbert_config=self.config)
-        self.encoder = CollectionEncoder(self.config, self.checkpoint)
-
-    def encode_query(self, q: str) -> torch.Tensor:
-        """
-        Encode a query string into a tensor of embeddings.
-
-        Args:
-            q: The query string to encode.
-
-        Returns:
-            A 2D tensor of query embeddings.
-            The tensor has shape (num_embeddings, embedding_dim), where num_embeddings is variable (one per token).
-        """
-        return self.checkpoint.queryFromText([q])[0]
-
-    def encode_doc(self, chunks: List[str]) -> List[torch.Tensor]:
-        """
-        Encode a batch of document chunks into tensors of embeddings.
-
-        Args:
-            chunks: A list of content strings to encode.
-
-        Returns:
-            A list of 2D tensors of embeddings, one for each input chunk.
-            Each tensor has shape (num_embeddings, embedding_dim), where num_embeddings is variable (one per token).
-        """
-        input_ids, attention_mask = self.checkpoint.doc_tokenizer.tensorize(chunks)
-        D, mask = self.checkpoint.doc(input_ids, attention_mask, keep_dims='return_mask')
-
-        embeddings_list = []
-        for i in range(len(chunks)):
-            Di = D[i]
-            maski = mask[i].squeeze(-1).bool()
-            Di = Di[maski]  # Keep only non-padded embeddings
-            embeddings_list.append(Di)
-
-        return embeddings_list
-
-    @property
-    def use_gpu(self):
-        return self.checkpoint.use_gpu
-
-
 class ColbertLive:
     def __init__(self,
                  db: DB,
@@ -127,7 +79,7 @@ class ColbertLive:
         self.db = db
         self.doc_pool_factor = doc_pool_factor
         self.query_pool_distance = query_pool_distance
-        self.model = Model(model_name, tokens_per_query)
+        self.model = ColbertModel(model_name, tokens_per_query)
 
     def encode_query(self, q: str) -> torch.Tensor:
         """
