@@ -2,6 +2,7 @@ import argparse
 import os
 
 from colbert_live.colbert_live import ColbertLive
+from colbert_live.models import Model
 from db import CmdlineDB
 
 
@@ -37,11 +38,12 @@ def main():
 
     args = parser.parse_args()
 
+    model = Model.from_name_or_path('answerdotai/answerai-colbert-small-v1')
     db = CmdlineDB('colbertlive',
-                   'answerdotai/answerai-colbert-small-v1',
+                   model.dim,
                    os.environ.get('ASTRA_DB_ID'),
                    os.environ.get('ASTRA_DB_TOKEN'))
-    colbert_live = ColbertLive(db)
+    colbert_live = ColbertLive(db, model)
 
     if args.command == "add":
         add_document(db, colbert_live, args.title, args.chunks)

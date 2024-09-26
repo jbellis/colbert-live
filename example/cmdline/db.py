@@ -8,8 +8,8 @@ from cassandra.cluster import ResultSet
 
 
 class CmdlineDB(AstraDB):
-    def __init__(self, keyspace: str, model_path: str, astra_db_id: str, astra_token: str):
-        super().__init__(keyspace, model_path, astra_db_id, astra_token, verbose=True)
+    def __init__(self, keyspace: str, embedding_dim: int, astra_db_id: str, astra_token: str):
+        super().__init__(keyspace, embedding_dim, astra_db_id, astra_token, verbose=True)
 
     def prepare(self, embedding_dim: int):
         # Create tables asynchronously

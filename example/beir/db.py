@@ -53,8 +53,8 @@ class ExponentialRetryPolicy(RetryPolicy):
 
 
 class AstraDBBeir(AstraDB):
-    def __init__(self, keyspace: str, model_path: str, astra_db_id: str, astra_token: str):
-        super().__init__(keyspace, model_path, astra_db_id, astra_token)
+    def __init__(self, keyspace: str, embedding_dim: int, astra_db_id: str, astra_token: str):
+        super().__init__(keyspace, embedding_dim, astra_db_id, astra_token)
         self.cluster.default_retry_policy = ExponentialRetryPolicy(max_retries=5, base_delay=1, max_delay=60)
 
     def prepare(self, embedding_dim):

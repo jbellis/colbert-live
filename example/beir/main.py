@@ -9,6 +9,8 @@ from beir import util
 from more_itertools import chunked
 from beir.datasets.data_loader import GenericDataLoader
 from beir.retrieval.evaluation import EvaluateRetrieval
+
+from colbert_live.models import Model
 from example.util import execute_concurrent_async
 from tqdm import tqdm
 
@@ -114,9 +116,10 @@ def test_all(datasets):
             ks_name = dataset.replace('-', '') + 'aaiv1'
             if doc_pool_factor > 1:
                 ks_name += f'pool{doc_pool_factor}'
-            db = AstraDBBeir(ks_name, model_name, os.environ.get('ASTRA_DB_ID'), os.environ.get('ASTRA_DB_TOKEN'))
 
-            colbert_live = ColbertLive(db, model_name, doc_pool_factor=doc_pool_factor)
+            model = Model.from_name_or_path(model_name, tokens_per_query=tokens_per_query)
+            db = AstraDBBeir(ks_name, model.dim, os.environ.get('ASTRA_DB_ID'), os.environ.get('ASTRA_DB_TOKEN'))
+            colbert_live = ColbertLive(db, model, doc_pool_factor=doc_pool_factor)
             corpus, queries, qrels = download_and_load_dataset(dataset)
             compute_and_store_embeddings(corpus, db, colbert_live)
 
@@ -125,8 +128,7 @@ def test_all(datasets):
                     for n_maxsim_candidates in [20]:
                         print(f'{dataset} @ {tokens_per_query} TPQ from keyspace {ks_name}, query pool distance {query_pool_distance}, CL {n_ann_docs}:{n_maxsim_candidates}')
 
-                        colbert_live = ColbertLive(db, model_name, query_pool_distance=query_pool_distance,
-                                                   tokens_per_query=tokens_per_query)
+                        colbert_live = ColbertLive(db, model, query_pool_distance=query_pool_distance)
                         results = search_and_benchmark(queries, n_ann_docs, n_maxsim_candidates, colbert_live)
                         evaluation_results = evaluate_model(qrels, results)
                         for k, score in evaluation_results.items():

@@ -8,6 +8,9 @@ from colbert.indexing.collection_encoder import CollectionEncoder
 from colbert.infra import ColBERTConfig
 from colpali_engine.models import ColPali, ColPaliProcessor
 
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="colbert.utils.amp")
+
 class Model(ABC):
     @abstractmethod
     def encode_query(self, q: str) -> torch.Tensor:

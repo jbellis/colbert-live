@@ -15,9 +15,6 @@ import json
 
 from .db import DB
 
-_model_dimensions = {'colbertv2.0': 128,
-                     'answerai-colbert-small-v1': 96}
-
 def _get_astra_bundle_url(db_id, token):
     # set up the request
     url = f"https://api.astra.datastax.com/v2/databases/{db_id}/secureBundleURL"
@@ -60,7 +57,7 @@ class AstraDB(DB):
 
     Args:
         keyspace (str): The keyspace to use in the database.  AstraDB will create it if it doesn't exist
-        model_path (str): Path to the ColBERT model, used to determine embedding dimensions
+        embedding_dim (int): The dimension of the ColBERT embeddings
         astra_db_id (Optional[str]): The Astra database ID (required for Astra connections)
         astra_token (Optional[str]): The Astra authentication token (required for Astra connections)
         verbose (bool): If True, print verbose output
@@ -71,21 +68,16 @@ class AstraDB(DB):
     - process_chunk_rows: Process the results of the chunk query
 
     Raises:
-        ValueError: If an unknown ColBERT model is specified
         Exception: If Astra credentials are incomplete or connection fails
     """
     def __init__(self,
                  keyspace: str,
-                 model_path: str,
+                 embedding_dim: int,
                  astra_db_id: Optional[str],
                  astra_token: Optional[str],
                  verbose: bool = False):
         self.verbose = verbose
-        model_name = model_path.split('/')[-1]
-        try:
-            embedding_dim = _model_dimensions[model_name]
-        except KeyError:
-            raise ValueError(f'Unknown model {model_name}, please add it to _model_dimensions')
+        self.embedding_dim = embedding_dim
         self.keyspace = keyspace
         
         if not astra_token:

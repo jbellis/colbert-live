@@ -7,9 +7,10 @@ import torch
 from colbert.modeling.checkpoint import pool_embeddings_hierarchical
 from colbert.modeling.colbert import colbert_score_packed
 from sklearn.cluster import AgglomerativeClustering
+from typing_extensions import deprecated
 
 from .db import DB
-from .models import ColbertModel
+from .models import ColbertModel, Model
 
 
 def _expand(x, a, b, c):
@@ -55,8 +56,7 @@ def _pool_query_embeddings(query_embeddings: torch.Tensor, max_distance: float, 
 class ColbertLive:
     def __init__(self,
                  db: DB,
-                 model_name: str = 'answerdotai/answerai-colbert-small-v1',
-                 tokens_per_query: int = 32,
+                 model: Model,
                  doc_pool_factor: int = 2,
                  query_pool_distance: float = 0.03
                  ):
@@ -66,7 +66,6 @@ class ColbertLive:
         Args:
             model_name: The name of the ColBERT model to use.
             db: The database instance to use for querying and storing embeddings.
-            tokens_per_query (optional): the maximum number of tokens to generate per query.
             doc_pool_factor (optional): The factor by which to pool document embeddings, as the number of embeddings per cluster.
                 `None` to disable.
             query_pool_distance (optional): The maximum cosine distance across which to pool query embeddings.
@@ -77,9 +76,9 @@ class ColbertLive:
             query_pool_distance and tokens_per_query are only used by search and encode_query.
         """
         self.db = db
+        self.model = model
         self.doc_pool_factor = doc_pool_factor
         self.query_pool_distance = query_pool_distance
-        self.model = ColbertModel(model_name, tokens_per_query)
 
     def encode_query(self, q: str) -> torch.Tensor:
         """
