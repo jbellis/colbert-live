@@ -1,5 +1,5 @@
 import math
-from typing import List, Dict, Any, Optional
+from typing import List, Any, Optional
 from typing import Tuple
 
 import numpy as np
@@ -59,14 +59,41 @@ class Model:
         self.checkpoint = Checkpoint(self.config.checkpoint, colbert_config=self.config)
         self.encoder = CollectionEncoder(self.config, self.checkpoint)
 
-    def encode_query(self, q: str):
+    def encode_query(self, q: str) -> torch.Tensor:
+        """
+        Encode a query string into a tensor of embeddings.
+
+        Args:
+            q: The query string to encode.
+
+        Returns:
+            A 2D tensor of query embeddings.
+            The tensor has shape (num_embeddings, embedding_dim), where num_embeddings is variable (one per token).
+        """
         return self.checkpoint.queryFromText([q])[0]
 
-    def doc_tokenizer(self):
-        return self.checkpoint.doc_tokenizer
+    def encode_doc(self, chunks: List[str]) -> List[torch.Tensor]:
+        """
+        Encode a batch of document chunks into tensors of embeddings.
 
-    def doc(self, input_ids, attention_mask, keep_dims='return_mask'):
-        return self.checkpoint.doc(input_ids, attention_mask, keep_dims=keep_dims)
+        Args:
+            chunks: A list of content strings to encode.
+
+        Returns:
+            A list of 2D tensors of embeddings, one for each input chunk.
+            Each tensor has shape (num_embeddings, embedding_dim), where num_embeddings is variable (one per token).
+        """
+        input_ids, attention_mask = self.checkpoint.doc_tokenizer.tensorize(chunks)
+        D, mask = self.checkpoint.doc(input_ids, attention_mask, keep_dims='return_mask')
+
+        embeddings_list = []
+        for i in range(len(chunks)):
+            Di = D[i]
+            maski = mask[i].squeeze(-1).bool()
+            Di = Di[maski]  # Keep only non-padded embeddings
+            embeddings_list.append(Di)
+
+        return embeddings_list
 
     @property
     def use_gpu(self):
@@ -136,26 +163,18 @@ class ColbertLive:
             A list of 2D tensors of embeddings, one for each input chunk.
             Each tensor has shape (num_embeddings, embedding_dim), where num_embeddings is variable (one per token).
         """
-        # Tokenize and encode the content
-        input_ids, attention_mask = self.model.doc_tokenizer().tensorize(chunks)
-        D, mask = self.model.doc(input_ids, attention_mask, keep_dims='return_mask')
+        embeddings_list = self.model.encode_doc(chunks)
 
-        embeddings_list = []
-        for i in range(len(chunks)):
-            # Remove padding and apply mask for each document
-            Di = D[i]
-            maski = mask[i].squeeze(-1).bool()
-            Di = Di[maski]  # Keep only non-padded embeddings
-
-            # Apply pooling if pool_factor > 1
-            if self.doc_pool_factor and self.doc_pool_factor > 1:
+        # Apply pooling if pool_factor > 1
+        if self.doc_pool_factor and self.doc_pool_factor > 1:
+            for i, Di in enumerate(embeddings_list):
                 Di, _ = pool_embeddings_hierarchical(
                     Di,
                     [Di.shape[0]],  # Single document length
                     pool_factor=self.doc_pool_factor,
                     protected_tokens=0
                 )
-            embeddings_list.append(Di)
+                embeddings_list[i] = Di
 
         return embeddings_list
 
