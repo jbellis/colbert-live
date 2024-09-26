@@ -15,14 +15,6 @@ class CmdlineDB(AstraDB):
         # Create tables asynchronously
         futures = []
 
-        # Create documents table
-        futures.append(self.session.execute_async(f"""
-            CREATE TABLE IF NOT EXISTS {self.keyspace}.documents (
-                id uuid PRIMARY KEY,
-                title text
-            )
-        """))
-
         # Create chunks table
         futures.append(self.session.execute_async(f"""
             CREATE TABLE IF NOT EXISTS {self.keyspace}.chunks (
@@ -57,9 +49,6 @@ class CmdlineDB(AstraDB):
         """)
 
         # Prepare statements
-        self.insert_document_stmt = self.session.prepare(f"""
-            INSERT INTO {self.keyspace}.documents (id, title) VALUES (?, ?)
-        """)
         self.insert_chunk_stmt = self.session.prepare(f"""
             INSERT INTO {self.keyspace}.chunks (doc_id, id, body) VALUES (?, ?, ?)
         """)
@@ -79,9 +68,8 @@ class CmdlineDB(AstraDB):
         index_future.result()
         print("Schema ready")
 
-    def add_document(self, title: str, chunks: List[str]):
+    def add_document(self, chunks: List[str]):
         doc_id = uuid.uuid4()
-        self.session.execute(self.insert_document_stmt, (doc_id, title))
 
         for i, chunk in enumerate(chunks):
             self.session.execute(self.insert_chunk_stmt, (doc_id, i, chunk))
