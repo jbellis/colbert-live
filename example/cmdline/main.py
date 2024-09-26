@@ -2,10 +2,11 @@ import argparse
 import os
 import tempfile
 from pathlib import Path
+import io
 
 from colbert_live.colbert_live import ColbertLive
 from colbert_live.models import Model
-from db import CmdlineDB
+from .db import CmdlineDB
 from pdf2image import convert_from_path
 from PIL import Image
 
@@ -26,13 +27,15 @@ def page_images_from(filename):
 
 def add_documents(db, colbert_live, filenames):
     for filename in filenames:
+        print(f"Extracting pages from '{filename}'...")
         images = page_images_from(filename)
         if images is None:
             continue
 
         image_bytes = [image.tobytes() for image in images]
         doc_id = db.add_documents(image_bytes)  # Create a new document ID
-        page_embeddings = colbert_live.encode_chunks(image_bytes)
+        print('Encoding pages...')
+        page_embeddings = colbert_live.encode_chunks(images)
         db.add_embeddings(doc_id, page_embeddings)
         
         print(f"Document '{filename}' added with ID: {doc_id}")
@@ -45,6 +48,15 @@ def search_documents(db, colbert_live, query, k=5):
     for i, (chunk_pk, score) in enumerate(results, 1):
         doc_id, page_num = chunk_pk
         print(f"{score:.3f}  {page_num}    {doc_id}")
+    
+    if results:
+        top_doc_id, top_page_num = results[0][0]
+        page_content = db.get_page_content(top_doc_id, top_page_num)
+        print(f"\nMost relevant page (Document ID: {top_doc_id}, Page: {top_page_num}):")
+        image = Image.open(io.BytesIO(page_content))
+        image.show()
+    else:
+        print("\nNo results found.")
 
 
 def main():
@@ -60,7 +72,7 @@ def main():
 
     args = parser.parse_args()
 
-    model = Model.from_name_or_path('"vidore/colpali-v1.2"')
+    model = Model.from_name_or_path('vidore/colpali-v1.2', device='cpu')
     db = CmdlineDB('colpali',
                    model.dim,
                    os.environ.get('ASTRA_DB_ID'),

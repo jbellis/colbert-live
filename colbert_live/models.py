@@ -55,7 +55,7 @@ class Model(ABC):
         if 'colbert' in name_or_path.lower():
             return ColbertModel(name_or_path, **kwargs)
         elif 'colpali' in name_or_path.lower():
-            return ColpaliModel(name_or_path)
+            return ColpaliModel(name_or_path, **kwargs)
         else:
             raise ValueError(f"Unknown model: {name_or_path}. You can manually instantiate an instance of ColbertModel or ColpaliModel.")
 

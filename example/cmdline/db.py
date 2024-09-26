@@ -15,24 +15,24 @@ class CmdlineDB(AstraDB):
         # Create tables asynchronously
         futures = []
 
-        # Create chunks table
+        # Create pages table
         futures.append(self.session.execute_async(f"""
-            CREATE TABLE IF NOT EXISTS {self.keyspace}.chunks (
+            CREATE TABLE IF NOT EXISTS {self.keyspace}.pages (
                 doc_id uuid,
-                id int,
-                body text,
-                PRIMARY KEY (doc_id, id)
+                page_num int,
+                content blob,
+                PRIMARY KEY (doc_id, page_num)
             )
         """))
 
-        # Create chunk_embeddings table
+        # Create page_embeddings table
         futures.append(self.session.execute_async(f"""
-            CREATE TABLE IF NOT EXISTS {self.keyspace}.chunk_embeddings (
+            CREATE TABLE IF NOT EXISTS {self.keyspace}.page_embeddings (
                 doc_id uuid,
-                chunk_id int,
+                page_num int,
                 embedding_id int,
                 embedding vector<float, {embedding_dim}>,
-                PRIMARY KEY (doc_id, chunk_id, embedding_id)
+                PRIMARY KEY (doc_id, page_num, embedding_id)
             )
         """))
 
@@ -43,47 +43,53 @@ class CmdlineDB(AstraDB):
         # Create colbert_ann index
         index_future = self.session.execute_async(f"""
             CREATE CUSTOM INDEX IF NOT EXISTS colbert_ann 
-            ON {self.keyspace}.chunk_embeddings(embedding) 
+            ON {self.keyspace}.page_embeddings(embedding) 
             USING 'StorageAttachedIndex'
             WITH OPTIONS = {{ 'source_model': 'bert' }}
         """)
 
         # Prepare statements
-        self.insert_chunk_stmt = self.session.prepare(f"""
-            INSERT INTO {self.keyspace}.chunks (doc_id, id, body) VALUES (?, ?, ?)
+        self.insert_page_stmt = self.session.prepare(f"""
+            INSERT INTO {self.keyspace}.pages (doc_id, page_num, content) VALUES (?, ?, ?)
         """)
         self.insert_embedding_stmt = self.session.prepare(f"""
-            INSERT INTO {self.keyspace}.chunk_embeddings (doc_id, chunk_id, embedding_id, embedding) VALUES (?, ?, ?, ?)
+            INSERT INTO {self.keyspace}.page_embeddings (doc_id, page_num, embedding_id, embedding) VALUES (?, ?, ?, ?)
         """)
         self.query_ann_stmt = self.session.prepare(f"""
-            SELECT doc_id, chunk_id, similarity_cosine(embedding, ?) AS similarity
-            FROM {self.keyspace}.chunk_embeddings
+            SELECT doc_id, page_num, similarity_cosine(embedding, ?) AS similarity
+            FROM {self.keyspace}.page_embeddings
             ORDER BY embedding ANN OF ?
             LIMIT ?
         """)
-        self.query_chunks_stmt = self.session.prepare(f"""
-            SELECT embedding FROM {self.keyspace}.chunk_embeddings WHERE doc_id = ? AND chunk_id = ?
+        self.query_pages_stmt = self.session.prepare(f"""
+            SELECT embedding FROM {self.keyspace}.page_embeddings WHERE doc_id = ? AND page_num = ?
         """)
 
         index_future.result()
         print("Schema ready")
 
-    def add_document(self, chunks: List[str]):
+    def add_documents(self, pages: List[bytes]) -> uuid.UUID:
         doc_id = uuid.uuid4()
 
-        for i, chunk in enumerate(chunks):
-            self.session.execute(self.insert_chunk_stmt, (doc_id, i, chunk))
+        for page_num, page_content in enumerate(pages):
+            self.session.execute(self.insert_page_stmt, (doc_id, page_num, page_content))
 
         return doc_id
 
-    def add_embeddings(self, doc_id: uuid.UUID, chunk_embeddings: List[torch.Tensor]):
-        for chunk_id, embeddings in enumerate(chunk_embeddings):
+    def add_embeddings(self, doc_id: uuid.UUID, page_embeddings: List[torch.Tensor]):
+        for page_num, embeddings in enumerate(page_embeddings):
             for embedding_id, embedding in enumerate(embeddings):
                 self.session.execute(self.insert_embedding_stmt,
-                                     (doc_id, chunk_id, embedding_id, embedding.tolist()))
+                                     (doc_id, page_num, embedding_id, embedding.tolist()))
 
     def process_ann_rows(self, result: ResultSet) -> List[tuple[Any, float]]:
-        return [((row.doc_id, row.chunk_id), row.similarity) for row in result]
+        return [((row.doc_id, row.page_num), row.similarity) for row in result]
 
     def process_chunk_rows(self, result: ResultSet) -> List[torch.Tensor]:
         return [torch.tensor(row.embedding) for row in result]
+
+    def get_page_content(self, doc_id: uuid.UUID, page_num: int) -> bytes:
+        query = f"SELECT content FROM {self.keyspace}.pages WHERE doc_id = ? AND page_num = ?"
+        result = self.session.execute(query, (doc_id, page_num))
+        row = result.one()
+        return row.content if row else None
