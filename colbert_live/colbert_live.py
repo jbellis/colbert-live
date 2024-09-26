@@ -52,6 +52,27 @@ def _pool_query_embeddings(query_embeddings: torch.Tensor, max_distance: float, 
 
     return torch.stack(pooled_embeddings)
 
+
+class Model:
+    def __init__(self, model_name: str, tokens_per_query: int):
+        self.config = ColBERTConfig(checkpoint=model_name, query_maxlen=tokens_per_query)
+        self.checkpoint = Checkpoint(self.config.checkpoint, colbert_config=self.config)
+        self.encoder = CollectionEncoder(self.config, self.checkpoint)
+
+    def encode_query(self, q: str):
+        return self.checkpoint.queryFromText([q])[0]
+
+    def doc_tokenizer(self):
+        return self.checkpoint.doc_tokenizer
+
+    def doc(self, input_ids, attention_mask, keep_dims='return_mask'):
+        return self.checkpoint.doc(input_ids, attention_mask, keep_dims=keep_dims)
+
+    @property
+    def use_gpu(self):
+        return self.checkpoint.use_gpu
+
+
 class ColbertLive:
     def __init__(self,
                  db: DB,
@@ -79,9 +100,7 @@ class ColbertLive:
         self.db = db
         self.doc_pool_factor = doc_pool_factor
         self.query_pool_distance = query_pool_distance
-        self._cf = ColBERTConfig(checkpoint=model_name, query_maxlen=tokens_per_query)
-        self._cp = Checkpoint(self._cf.checkpoint, colbert_config=self._cf)
-        self.encoder = CollectionEncoder(self._cf, self._cp)
+        self.model = Model(model_name, tokens_per_query)
 
     def encode_query(self, q: str) -> torch.Tensor:
         """
@@ -93,11 +112,11 @@ class ColbertLive:
         Returns:
             A tensor of query embeddings.
         """
-        query_embeddings = self._cp.queryFromText([q])[0]  # Get embeddings for a single query
+        query_embeddings = self.model.encode_query(q)  # Get embeddings for a single query
         if not self.query_pool_distance:
             result = query_embeddings  # Add batch dimension
         else:
-            result = _pool_query_embeddings(query_embeddings, self.query_pool_distance, self._cp.use_gpu)  # Add batch dimension
+            result = _pool_query_embeddings(query_embeddings, self.query_pool_distance, self.model.use_gpu)  # Add batch dimension
         return result.unsqueeze(0)
 
     def encode_chunks(self, chunks: List[str]) -> List[torch.Tensor]:
@@ -118,8 +137,8 @@ class ColbertLive:
             Each tensor has shape (num_embeddings, embedding_dim), where num_embeddings is variable (one per token).
         """
         # Tokenize and encode the content
-        input_ids, attention_mask = self._cp.doc_tokenizer.tensorize(chunks)
-        D, mask = self._cp.doc(input_ids, attention_mask, keep_dims='return_mask')
+        input_ids, attention_mask = self.model.doc_tokenizer().tensorize(chunks)
+        D, mask = self.model.doc(input_ids, attention_mask, keep_dims='return_mask')
 
         embeddings_list = []
         for i in range(len(chunks)):
@@ -211,7 +230,7 @@ class ColbertLive:
         # Load document encodings
         D_packed, D_lengths = self._load_data_and_construct_tensors(candidates)
         # Calculate full ColBERT scores
-        scores = colbert_score_packed(Q, D_packed, D_lengths, config=self._cf)
+        scores = colbert_score_packed(Q, D_packed, D_lengths, config=self.model.config)
 
         # Map the scores back to chunk IDs and sort
         results = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
