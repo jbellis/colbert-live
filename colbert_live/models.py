@@ -1,13 +1,15 @@
-from abc import ABC
+from abc import ABC, abstractmethod
 from typing import List
 
 import torch
+from PIL.Image import Image
 from colbert import Checkpoint
 from colbert.indexing.collection_encoder import CollectionEncoder
 from colbert.infra import ColBERTConfig
-
+from colpali_engine.models import ColPali, ColPaliProcessor
 
 class Model(ABC):
+    @abstractmethod
     def encode_query(self, q: str) -> torch.Tensor:
         """
         Encode a query string into a tensor of embeddings.
@@ -21,6 +23,7 @@ class Model(ABC):
         """
         pass
 
+    @abstractmethod
     def encode_doc(self, chunks: List[str]) -> List[torch.Tensor]:
         """
         Encode a batch of document chunks into tensors of embeddings.
@@ -35,7 +38,13 @@ class Model(ABC):
         pass
 
     @property
+    @abstractmethod
     def use_gpu(self):
+        pass
+
+    @property
+    @abstractmethod
+    def dim(self):
         pass
 
 
@@ -64,3 +73,46 @@ class ColbertModel(Model):
     @property
     def use_gpu(self):
         return self.checkpoint.use_gpu
+
+    @property
+    def dim(self):
+        return self.config.dim
+
+
+class ColPaliModel(Model):
+    def __init__(self, model_name: str, device: str = "cuda"):
+        self.device = device
+        self.colpali = ColPali.from_pretrained(
+            model_name,
+            torch_dtype=torch.bfloat16,
+            device_map="cuda" if device == "cuda" else None,
+        ).eval()
+        self.processor = ColPaliProcessor.from_pretrained(model_name)
+
+        if device != "cuda":
+            self.colpali = self.colpali.to(device)
+
+    def encode_query(self, q: str) -> torch.Tensor:
+        with torch.no_grad():
+            batch = self.processor.process_queries([q])
+            batch = {k: v.to(self.device) for k, v in batch.items()}
+            embeddings = self.colpali(**batch)
+
+        return embeddings.cpu()[0]
+
+    def encode_doc(self, images: List[Image]) -> List[torch.Tensor]:
+        with torch.no_grad():
+            batch = self.processor.process_images(images)
+            batch = {k: v.to(self.device) for k, v in batch.items()}
+            embeddings = self.colpali(**batch)
+
+        return list(torch.unbind(embeddings))
+
+    @property
+    def use_gpu(self):
+        return self.device == "cuda"
+
+    @property
+    def dim(self):
+        return self.colpali.dim
+
