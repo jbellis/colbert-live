@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from itertools import cycle
@@ -106,18 +107,8 @@ def evaluate_model(qrels: dict, results: dict):
             evaluation_results[f"{k}"] = score
     return evaluation_results
 
-def test_all():
-    for dataset, tokens_per_query in [
-        ('webis-touche2020', 32),
-        # ('scifact', 48),
-        # ('nfcorpus', 32),
-        # ('scidocs', 48),
-        # ('trec-covid', 48),
-        # ('fiqa', 32),
-        # ('arguana', 64),
-        # ('quora', 32)
-        # ('hotpotqa', 32)
-    ]:
+def test_all(datasets):
+    for dataset, tokens_per_query in datasets:
         for doc_pool_factor in [2]:
             model_name = 'answerdotai/answerai-colbert-small-v1'
             ks_name = dataset.replace('-', '') + 'aaiv1'
@@ -143,4 +134,21 @@ def test_all():
 
 
 if __name__ == "__main__":
-    test_all()
+    all_datasets = [
+        ('webis-touche2020', 32),
+        ('scifact', 48),
+        ('nfcorpus', 32),
+        ('scidocs', 48),
+        ('trec-covid', 48),
+        ('fiqa', 32),
+        ('arguana', 64),
+        ('quora', 32),
+        ('hotpotqa', 32)
+    ]
+
+    if len(sys.argv) > 1:
+        dataset_dict = {name: tpq for name, tpq in all_datasets}
+        datasets_to_run = [(name, dataset_dict[name]) for name in all_datasets if name in dataset_dict]
+    else:
+        datasets_to_run = all_datasets
+    test_all(datasets_to_run)
