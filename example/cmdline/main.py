@@ -4,6 +4,8 @@ import tempfile
 from pathlib import Path
 import io
 
+from tqdm import tqdm
+
 from colbert_live.colbert_live import ColbertLive
 from colbert_live.models import Model
 from .db import CmdlineDB
@@ -28,15 +30,15 @@ def page_images_from(filename):
 def add_documents(db, colbert_live, filenames):
     for filename in filenames:
         print(f"Extracting pages from '{filename}'...")
-        images = page_images_from(filename)
-        if images is None:
+        page_images = page_images_from(filename)
+        if page_images is None:
             continue
 
-        image_bytes = [image.tobytes() for image in images]
-        doc_id = db.add_documents(image_bytes)  # Create a new document ID
-        print('Encoding pages...')
-        page_embeddings = colbert_live.encode_chunks(images)
-        db.add_embeddings(doc_id, page_embeddings)
+        page_bytes = [image.tobytes() for image in page_images]
+        doc_id = db.add_documents(page_bytes)  # Create a new document ID
+        for image in tqdm(page_images, desc="Encoding pages"):
+            page_embeddings = colbert_live.encode_chunks([image])
+            db.add_embeddings(doc_id, page_embeddings)
         
         print(f"Document '{filename}' added with ID: {doc_id}")
 
