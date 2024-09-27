@@ -107,7 +107,7 @@ class ColpaliModel(Model):
             batch = {k: v.to(self.device) for k, v in batch.items()}
             embeddings = self.colpali(**batch)
 
-        return embeddings.cpu()[0]
+        return embeddings[0]
 
     def encode_doc(self, images: List[Image]) -> List[torch.Tensor]:
         with torch.no_grad():

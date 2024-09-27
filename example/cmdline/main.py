@@ -74,7 +74,7 @@ def main():
 
     args = parser.parse_args()
 
-    model = Model.from_name_or_path('vidore/colpali-v1.2', device='cpu')
+    model = Model.from_name_or_path('vidore/colpali-v1.2')
     db = CmdlineDB('colpali',
                    model.dim,
                    os.environ.get('ASTRA_DB_ID'),

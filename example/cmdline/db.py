@@ -55,7 +55,7 @@ class CmdlineDB(AstraDB):
         self.insert_embedding_stmt = self.session.prepare(f"""
             INSERT INTO {self.keyspace}.page_embeddings (doc_id, page_num, embedding_id, embedding) VALUES (?, ?, ?, ?)
         """)
-        self.query_ann_stmt = self.session.prepare(f"""
+        self.query_chunks_stmt = self.session.prepare(f"""
             SELECT doc_id, page_num, similarity_cosine(embedding, ?) AS similarity
             FROM {self.keyspace}.page_embeddings
             ORDER BY embedding ANN OF ?

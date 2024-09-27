@@ -21,7 +21,7 @@ def _expand(x, a, b, c):
         return 0
     return max(x, int(a + b*x + c*x*math.log(x)))
 
-def _pool_query_embeddings(query_embeddings: torch.Tensor, max_distance: float, use_gpu: bool) -> torch.Tensor:
+def _pool_query_embeddings(query_embeddings: torch.Tensor, max_distance: float) -> torch.Tensor:
     # Convert embeddings to numpy for clustering
     embeddings_np = query_embeddings.cpu().numpy()
     # Cluster
@@ -40,9 +40,7 @@ def _pool_query_embeddings(query_embeddings: torch.Tensor, max_distance: float, 
         cluster_embeddings = query_embeddings[cluster_indices]
         if len(cluster_embeddings) > 1:
             # average the embeddings in the cluster
-            pooled_embedding = cluster_embeddings.mean(dim=0)
-            if use_gpu:
-                pooled_embedding = pooled_embedding.cuda()
+            pooled_embedding = cluster_embeddings.mean(dim=0).to(query_embeddings.device)
             # re-normalize the pooled embedding
             pooled_embedding = pooled_embedding / torch.norm(pooled_embedding, p=2)
             pooled_embeddings.append(pooled_embedding)
@@ -91,10 +89,11 @@ class ColbertLive:
             A tensor of query embeddings.
         """
         query_embeddings = self.model.encode_query(q)  # Get embeddings for a single query
+        query_embeddings = query_embeddings.float()  # Convert to float32
         if not self.query_pool_distance:
             result = query_embeddings  # Add batch dimension
         else:
-            result = _pool_query_embeddings(query_embeddings, self.query_pool_distance, self.model.use_gpu)  # Add batch dimension
+            result = _pool_query_embeddings(query_embeddings, self.query_pool_distance)  # Add batch dimension
         return result.unsqueeze(0)
 
     def encode_chunks(self, chunks: List[str]) -> List[torch.Tensor]:
@@ -119,6 +118,8 @@ class ColbertLive:
         # Apply pooling if pool_factor > 1
         if self.doc_pool_factor and self.doc_pool_factor > 1:
             for i, Di in enumerate(embeddings_list):
+                # Convert to float32 before pooling
+                Di = Di.float()
                 Di, _ = pool_embeddings_hierarchical(
                     Di,
                     [Di.shape[0]],  # Single document length
