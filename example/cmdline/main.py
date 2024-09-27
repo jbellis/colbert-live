@@ -59,22 +59,23 @@ def add_documents(db, colbert_live, filenames):
 def search_documents(db, colbert_live, query, k=5):
     results = colbert_live.search(query, k=k)
     print("\nSearch results:")
-    print("Score  Page  Document ID")
+    print("Rank  Score  Page  Document ID")
     for i, (chunk_pk, score) in enumerate(results, 1):
         doc_id, page_num = chunk_pk
-        print(f"{score:.3f}  {page_num}    {doc_id}")
+        print(f"{i:<4}  {score:.3f}  {page_num:<4}  {doc_id}")
 
     if results:
-        print("\nTop 3 search results:")
-        for i, (chunk_pk, score) in enumerate(results[:3], 1):
-            doc_id, page_num = chunk_pk
+        print("\nDisplaying top 3 search results:")
+        for i, ((doc_id, page_num), score) in enumerate(results[:3], 1):
             page_content = db.get_page_content(doc_id, page_num)
             if page_content:
                 try:
                     image = Image.open(io.BytesIO(page_content))
-                    print(f"\nResult {i} (Document ID: {doc_id}, Page: {page_num}, Score: {score:.3f}):")
-                    term_image = AutoImage(image)
-                    print(term_image)
+                    print(f"\nResult {i}:")
+                    print(f"Document ID: {doc_id}")
+                    print(f"Page: {page_num}")
+                    print(f"Score: {score:.3f}")
+                    image.show()
                 except Exception as e:
                     print(f"Error displaying image for result {i}: {e}")
             else:
