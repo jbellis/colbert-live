@@ -6,6 +6,7 @@ from PIL.Image import Image
 from colbert import Checkpoint
 from colbert.indexing.collection_encoder import CollectionEncoder
 from colbert.infra import ColBERTConfig
+from colbert.modeling.colbert import colbert_score_packed
 from colpali_engine.models import ColPali, ColPaliProcessor
 
 import warnings
@@ -37,6 +38,21 @@ class Model(ABC):
         Returns:
             A list of 2D tensors of embeddings, one for each input chunk.
             Each tensor has shape (num_embeddings, embedding_dim), where num_embeddings is variable (one per token).
+        """
+        pass
+
+    @abstractmethod
+    def score(self, Q: torch.Tensor, D_packed: torch.Tensor, D_lengths: torch.Tensor) -> torch.Tensor:
+        """
+        Calculate ColBERT scores for given query and document embeddings.
+
+        Args:
+            Q: Query embeddings tensor.
+            D_packed: Packed document embeddings tensor.
+            D_lengths: Tensor of document lengths.
+
+        Returns:
+            A tensor of ColBERT scores.
         """
         pass
 
@@ -82,6 +98,9 @@ class ColbertModel(Model):
 
         return embeddings_list
 
+    def score(self, Q: torch.Tensor, D_packed: torch.Tensor, D_lengths: torch.Tensor) -> torch.Tensor:
+        return colbert_score_packed(Q, D_packed, D_lengths, config=self.config)
+
     @property
     def use_gpu(self):
         return self.checkpoint.use_gpu
@@ -116,6 +135,15 @@ class ColpaliModel(Model):
             embeddings = self.colpali(**batch)
 
         return list(torch.unbind(embeddings))
+
+    def score(self, Q: torch.Tensor, D_packed: torch.Tensor, D_lengths: torch.Tensor) -> torch.Tensor:
+        # Unpack D_packed into a list of tensors based on D_lengths
+        D = torch.split(D_packed, D_lengths.tolist())
+        
+        # Compute scores using the processor's score method
+        scores = self.processor.score(Q, D)
+        
+        return scores.squeeze(0)  # Remove batch dimension
 
     @property
     def use_gpu(self):

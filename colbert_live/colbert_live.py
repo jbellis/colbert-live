@@ -201,7 +201,7 @@ class ColbertLive:
         # Load document encodings
         D_packed, D_lengths = self._load_data_and_construct_tensors(candidates)
         # Calculate full ColBERT scores
-        scores = colbert_score_packed(Q, D_packed, D_lengths, config=self.model.config)
+        scores = self.model.score(Q, D_packed, D_lengths)
 
         # Map the scores back to chunk IDs and sort
         results = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
