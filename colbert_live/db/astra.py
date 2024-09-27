@@ -1,5 +1,3 @@
-import json
-import os
 import time
 import urllib.error
 import urllib.request
@@ -14,6 +12,20 @@ from cassandra.policies import ExponentialReconnectionPolicy
 import json
 
 from .db import DB
+import json
+import time
+import urllib.error
+import urllib.request
+from typing import Optional, Any
+
+import torch
+from cassandra.auth import PlainTextAuthProvider
+from cassandra.cluster import Cluster, ResultSet
+from cassandra.concurrent import execute_concurrent_with_args
+from cassandra.policies import ExponentialReconnectionPolicy
+
+from .db import DB
+
 
 def _get_astra_bundle_url(db_id, token):
     # set up the request
@@ -211,3 +223,124 @@ class AstraCQL(DB):
             """
             self.session.execute(create_keyspace_query)
             if self.verbose: print(f"Keyspace '{self.keyspace}' created or verified")
+import os
+from typing import List, Any, Tuple
+import torch
+from astrapy import DataAPIClient
+from astrapy.constants import VectorMetric
+
+from .db import DB
+
+class AstraDoc(DB):
+    def __init__(self, collection_name: str):
+        """
+        Initialize the AstraDoc class.
+
+        Args:
+            collection_name (str): The name of the collection to use.
+        """
+        self._client = DataAPIClient(token=os.environ["ASTRA_DB_TOKEN"])
+        self._db = self._client.get_database(os.environ["ASTRA_DB_ID"])
+        self._embeddings = None
+        self._files = None
+        self._init_collections(collection_name)
+
+    def _init_collections(self, collection_name: str):
+        """
+        Initialize the embeddings and files collections.
+
+        Args:
+            collection_name (str): The base name for the collections.
+        """
+        embeddings_collection_name = f"{collection_name}_embeddings"
+        files_collection_name = f"{collection_name}_files"
+        
+        collections = set(c.name for c in self._db.list_collections())
+
+        if embeddings_collection_name in collections:
+            self._embeddings = self._db[embeddings_collection_name]
+        else:
+            self._embeddings = self._db.create_collection(
+                embeddings_collection_name,
+                indexing={'deny': ['chunk']},
+                dimension=768,
+                metric=VectorMetric.COSINE
+            )
+
+        if files_collection_name in collections:
+            self._files = self._db[files_collection_name]
+        else:
+            self._files = self._db.create_collection(files_collection_name)
+
+    def query_ann(self, embeddings: torch.Tensor, limit: int) -> List[List[Tuple[Any, float]]]:
+        """
+        Perform an approximate nearest neighbor (ANN) search of the ColBERT embeddings.
+
+        Args:
+            embeddings (torch.Tensor): A tensor of ColBERT embeddings to compare against.
+            limit (int): The maximum number of results to return for each embedding.
+
+        Returns:
+            List[List[Tuple[Any, float]]]: A list of lists, one per embedding, where each inner list
+            contains tuples of (file_id, similarity) for the chunks closest to each query embedding.
+        """
+        results = []
+        for embedding in embeddings:
+            query_result = self._embeddings.find(
+                {},
+                sort={"$vector": embedding.tolist()},
+                limit=limit,
+                projection={"file_id": 1, "_id": 0}
+            )
+            results.append([(doc['file_id'], doc['$similarity']) for doc in query_result])
+        return results
+
+    def query_chunks(self, file_ids: List[Any]) -> List[List[torch.Tensor]]:
+        """
+        Retrieve all ColBERT embeddings for specific chunks.
+
+        Args:
+            file_ids (List[Any]): A list of file IDs identifying the chunks.
+
+        Returns:
+            List[List[torch.Tensor]]: A list of lists of PyTorch tensors representing
+            the ColBERT embeddings for each of the specified chunks.
+        """
+        results = []
+        for file_id in file_ids:
+            chunks = self._embeddings.find(
+                {"file_id": file_id},
+                projection={"$vector": 1, "_id": 0}
+            )
+            results.append([torch.tensor(doc['$vector']) for doc in chunks])
+        return results
+
+    def insert(self, file_id: str, full_path: str, chunks: List[str], encoded_chunks: List[torch.Tensor]):
+        """
+        Insert the file and embeddings documents associated with the given file.
+
+        Args:
+            file_id (str): The ID of the file.
+            full_path (str): The full path of the file.
+            chunks (List[str]): The text chunks of the file.
+            encoded_chunks (List[torch.Tensor]): The encoded chunks as tensors.
+        """
+        file_doc = {"_id": file_id, "path": full_path}
+        self._files.insert_one(file_doc)
+        
+        embeddings_docs = [
+            {'file_id': file_id, 'chunk': chunk, '$vector': embedding.tolist()}
+            for chunk, embedding in zip(chunks, encoded_chunks)
+        ]
+        for i in range(0, len(embeddings_docs), 20):
+            self._embeddings.insert_many(embeddings_docs[i:i + 20])
+
+    def delete(self, file_id: str):
+        """
+        Delete the file and embeddings documents associated with the given file.
+
+        Args:
+            file_id (str): The ID of the file to delete.
+        """
+        self._embeddings.delete_many({"file_id": file_id})
+        self._files.delete_one({"_id": file_id})
