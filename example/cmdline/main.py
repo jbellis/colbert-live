@@ -36,24 +36,32 @@ def add_documents(db, colbert_live, filenames):
         if page_images is None:
             continue
 
-        page_pngs = []
+        pngs = []
+        all_embeddings = []
         for i, image in enumerate(page_images):
+            # Compute embeddings using the original image
+            page_embeddings = colbert_live.encode_chunks([image])[0]
+            all_embeddings.append(page_embeddings)
+            
+            # Resize the image to half its original resolution
+            width, height = image.size
+            resized_image = image.resize((width // 2, height // 2), Image.LANCZOS)
+            
             with io.BytesIO() as output:
-                image.save(output, format="PNG")
+                resized_image.save(output, format="PNG")
                 page_png = output.getvalue()
-                page_pngs.append(page_png)
+                pngs.append(page_png)
                 
-                # Display the page using term-image
+                # Display the resized page using term-image
                 print(f"\nPage {i+1}:")
-                term_image = AutoImage(image)
+                term_image = AutoImage(resized_image)
                 print(term_image)
 
-        doc_id = db.add_documents(page_pngs)  # Create a new document ID
-        for image in tqdm(page_images, desc="Encoding pages"):
-            page_embeddings = colbert_live.encode_chunks([image])
-            db.add_embeddings(doc_id, page_embeddings)
+        doc_id = db.add_documents(pngs)  # Create a new document ID
+        for page_num, embeddings in enumerate(all_embeddings, start=1):
+            db.add_embeddings(doc_id, page_num, embeddings)
 
-        print(f"Document '{filename}' added with ID: {doc_id}")
+        print(f"Document '{filename}' {len(pngs)} pages added with ID {doc_id}")
 
 
 def search_documents(db, colbert_live, query, k=5):

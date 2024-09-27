@@ -72,16 +72,15 @@ class CmdlineDB(AstraDB):
     def add_documents(self, pages: List[bytes]) -> uuid.UUID:
         doc_id = uuid.uuid4()
 
-        for page_num, page_content in enumerate(pages):
+        for page_num, page_content in enumerate(pages, start=1):
             self.session.execute(self.insert_page_stmt, (doc_id, page_num, page_content))
 
         return doc_id
 
-    def add_embeddings(self, doc_id: uuid.UUID, page_embeddings: List[torch.Tensor]):
-        for page_num, embeddings in enumerate(page_embeddings):
-            for embedding_id, embedding in enumerate(embeddings):
-                self.session.execute(self.insert_embedding_stmt,
-                                     (doc_id, page_num, embedding_id, embedding.tolist()))
+    def add_embeddings(self, doc_id: uuid.UUID, page_num: int, embeddings: torch.Tensor):
+        for embedding_id, embedding in enumerate(embeddings):
+            self.session.execute(self.insert_embedding_stmt,
+                                 (doc_id, page_num, embedding_id, embedding.tolist()))
 
     def process_ann_rows(self, result: ResultSet) -> List[tuple[Any, float]]:
         return [((row.doc_id, row.page_num), row.similarity) for row in result]
