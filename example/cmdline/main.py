@@ -11,6 +11,7 @@ from colbert_live.models import Model
 from .db import CmdlineDB
 from pdf2image import convert_from_path
 from PIL import Image
+import io
 
 def page_images_from(filename):
     file_path = Path(filename)
@@ -34,8 +35,13 @@ def add_documents(db, colbert_live, filenames):
         if page_images is None:
             continue
 
-        page_bytes = [image.tobytes() for image in page_images]
-        doc_id = db.add_documents(page_bytes)  # Create a new document ID
+        page_pngs = []
+        for image in page_images:
+            with io.BytesIO() as output:
+                image.save(output, format="PNG")
+                page_pngs.append(output.getvalue())
+
+        doc_id = db.add_documents(page_pngs)  # Create a new document ID
         for image in tqdm(page_images, desc="Encoding pages"):
             page_embeddings = colbert_live.encode_chunks([image])
             db.add_embeddings(doc_id, page_embeddings)
@@ -59,12 +65,10 @@ def search_documents(db, colbert_live, query, k=5):
         if page_content:
             print(f"Page content size: {len(page_content)} bytes")
             try:
-                # Assuming the image is stored as RGB data
-                image_size = (int((len(page_content) / 3) ** 0.5),) * 2
-                image = Image.frombytes('RGB', image_size, page_content)
+                image = Image.open(io.BytesIO(page_content))
                 print(f"Image dimensions: {image.size[0]}x{image.size[1]}")
                 with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
-                    image.save(temp_file.name)
+                    image.save(temp_file.name, format="PNG")
                     print(f"Image saved to: {temp_file.name}")
                     print("You can open this file to view the image.")
             except Exception as e:
