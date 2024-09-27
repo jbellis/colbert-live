@@ -2,6 +2,7 @@ import argparse
 import os
 import tempfile
 from pathlib import Path
+from typing import List, Optional
 
 from tqdm import tqdm
 
@@ -16,7 +17,7 @@ def page_images_from(filename):
     if file_path.suffix.lower() != '.pdf':
         print(f"Warning: {filename} is not a PDF file. Skipping.")
         return None
-    
+
     with tempfile.TemporaryDirectory() as path:
         images = convert_from_path(
             file_path,
@@ -38,7 +39,7 @@ def add_documents(db, colbert_live, filenames):
         for image in tqdm(page_images, desc="Encoding pages"):
             page_embeddings = colbert_live.encode_chunks([image])
             db.add_embeddings(doc_id, page_embeddings)
-        
+
         print(f"Document '{filename}' added with ID: {doc_id}")
 
 
@@ -49,13 +50,27 @@ def search_documents(db, colbert_live, query, k=5):
     for i, (chunk_pk, score) in enumerate(results, 1):
         doc_id, page_num = chunk_pk
         print(f"{score:.3f}  {page_num}    {doc_id}")
-    
+
     if results:
         top_doc_id, top_page_num = results[0][0]
         page_content = db.get_page_content(top_doc_id, top_page_num)
         print(f"\nMost relevant page (Document ID: {top_doc_id}, Page: {top_page_num}):")
-        image = Image.frombytes('RGBA', (1, 1), page_content)
-        image.show()
+
+        if page_content:
+            print(f"Page content size: {len(page_content)} bytes")
+            try:
+                # Assuming the image is stored as RGB data
+                image_size = (int((len(page_content) / 3) ** 0.5),) * 2
+                image = Image.frombytes('RGB', image_size, page_content)
+                print(f"Image dimensions: {image.size[0]}x{image.size[1]}")
+                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
+                    image.save(temp_file.name)
+                    print(f"Image saved to: {temp_file.name}")
+                    print("You can open this file to view the image.")
+            except Exception as e:
+                print(f"Error creating image: {e}")
+        else:
+            print("Error: Page content is empty")
     else:
         print("\nNo results found.")
 
