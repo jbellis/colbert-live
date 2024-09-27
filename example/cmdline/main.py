@@ -12,6 +12,7 @@ from .db import CmdlineDB
 from pdf2image import convert_from_path
 from PIL import Image
 import io
+from term_image.image import AutoImage
 
 def page_images_from(filename):
     file_path = Path(filename)
@@ -36,10 +37,16 @@ def add_documents(db, colbert_live, filenames):
             continue
 
         page_pngs = []
-        for image in page_images:
+        for i, image in enumerate(page_images):
             with io.BytesIO() as output:
                 image.save(output, format="PNG")
-                page_pngs.append(output.getvalue())
+                page_png = output.getvalue()
+                page_pngs.append(page_png)
+                
+                # Display the page using term-image
+                print(f"\nPage {i+1}:")
+                term_image = AutoImage(image)
+                print(term_image)
 
         doc_id = db.add_documents(page_pngs)  # Create a new document ID
         for image in tqdm(page_images, desc="Encoding pages"):
@@ -58,23 +65,20 @@ def search_documents(db, colbert_live, query, k=5):
         print(f"{score:.3f}  {page_num}    {doc_id}")
 
     if results:
-        top_doc_id, top_page_num = results[0][0]
-        page_content = db.get_page_content(top_doc_id, top_page_num)
-        print(f"\nMost relevant page (Document ID: {top_doc_id}, Page: {top_page_num}):")
-
-        if page_content:
-            print(f"Page content size: {len(page_content)} bytes")
-            try:
-                image = Image.open(io.BytesIO(page_content))
-                print(f"Image dimensions: {image.size[0]}x{image.size[1]}")
-                with tempfile.NamedTemporaryFile(suffix='.png', delete=False) as temp_file:
-                    image.save(temp_file.name, format="PNG")
-                    print(f"Image saved to: {temp_file.name}")
-                    print("You can open this file to view the image.")
-            except Exception as e:
-                print(f"Error creating image: {e}")
-        else:
-            print("Error: Page content is empty")
+        print("\nTop 3 search results:")
+        for i, (chunk_pk, score) in enumerate(results[:3], 1):
+            doc_id, page_num = chunk_pk
+            page_content = db.get_page_content(doc_id, page_num)
+            if page_content:
+                try:
+                    image = Image.open(io.BytesIO(page_content))
+                    print(f"\nResult {i} (Document ID: {doc_id}, Page: {page_num}, Score: {score:.3f}):")
+                    term_image = AutoImage(image)
+                    print(term_image)
+                except Exception as e:
+                    print(f"Error displaying image for result {i}: {e}")
+            else:
+                print(f"\nResult {i}: Error: Page content is empty")
     else:
         print("\nNo results found.")
 
