@@ -237,23 +237,22 @@ class AstraDoc(DB):
         Initialize the AstraDoc class.
 
         Args:
-            collection_name (str): The name of the collection to use.
+            collection_name (str): The name of the collection to use for documents.
         """
         self._client = DataAPIClient(token=os.environ["ASTRA_DB_TOKEN"])
         self._db = self._client.get_database(os.environ["ASTRA_DB_ID"])
         self._embeddings = None
-        self._files = None
+        self._docs = None
         self._init_collections(collection_name)
 
     def _init_collections(self, collection_name: str):
         """
-        Initialize the embeddings and files collections.
+        Initialize the embeddings and documents collections.
 
         Args:
-            collection_name (str): The base name for the collections.
+            collection_name (str): The name for the documents collection.
         """
         embeddings_collection_name = f"{collection_name}_embeddings"
-        files_collection_name = f"{collection_name}_files"
         
         collections = set(c.name for c in self._db.list_collections())
 
@@ -267,10 +266,10 @@ class AstraDoc(DB):
                 metric=VectorMetric.COSINE
             )
 
-        if files_collection_name in collections:
-            self._files = self._db[files_collection_name]
+        if collection_name in collections:
+            self._docs = self._db[collection_name]
         else:
-            self._files = self._db.create_collection(files_collection_name)
+            self._docs = self._db.create_collection(collection_name)
 
     def query_ann(self, embeddings: torch.Tensor, limit: int) -> List[List[Tuple[Any, float]]]:
         """
@@ -282,7 +281,7 @@ class AstraDoc(DB):
 
         Returns:
             List[List[Tuple[Any, float]]]: A list of lists, one per embedding, where each inner list
-            contains tuples of (file_id, similarity) for the chunks closest to each query embedding.
+            contains tuples of (doc_id, similarity) for the chunks closest to each query embedding.
         """
         results = []
         for embedding in embeddings:
@@ -290,57 +289,57 @@ class AstraDoc(DB):
                 {},
                 sort={"$vector": embedding.tolist()},
                 limit=limit,
-                projection={"file_id": 1, "_id": 0}
+                projection={"doc_id": 1, "_id": 0}
             )
-            results.append([(doc['file_id'], doc['$similarity']) for doc in query_result])
+            results.append([(doc['doc_id'], doc['$similarity']) for doc in query_result])
         return results
 
-    def query_chunks(self, file_ids: List[Any]) -> List[List[torch.Tensor]]:
+    def query_chunks(self, doc_ids: List[Any]) -> List[List[torch.Tensor]]:
         """
         Retrieve all ColBERT embeddings for specific chunks.
 
         Args:
-            file_ids (List[Any]): A list of file IDs identifying the chunks.
+            doc_ids (List[Any]): A list of document IDs identifying the chunks.
 
         Returns:
             List[List[torch.Tensor]]: A list of lists of PyTorch tensors representing
             the ColBERT embeddings for each of the specified chunks.
         """
         results = []
-        for file_id in file_ids:
+        for doc_id in doc_ids:
             chunks = self._embeddings.find(
-                {"file_id": file_id},
+                {"doc_id": doc_id},
                 projection={"$vector": 1, "_id": 0}
             )
             results.append([torch.tensor(doc['$vector']) for doc in chunks])
         return results
 
-    def insert(self, file_id: str, full_path: str, chunks: List[str], encoded_chunks: List[torch.Tensor]):
+    def insert(self, doc_id: str, full_path: str, chunks: List[str], encoded_chunks: List[torch.Tensor]):
         """
-        Insert the file and embeddings documents associated with the given file.
+        Insert the document and embeddings documents associated with the given document.
 
         Args:
-            file_id (str): The ID of the file.
-            full_path (str): The full path of the file.
-            chunks (List[str]): The text chunks of the file.
+            doc_id (str): The ID of the document.
+            full_path (str): The full path of the document.
+            chunks (List[str]): The text chunks of the document.
             encoded_chunks (List[torch.Tensor]): The encoded chunks as tensors.
         """
-        file_doc = {"_id": file_id, "path": full_path}
-        self._files.insert_one(file_doc)
+        doc = {"_id": doc_id, "path": full_path}
+        self._docs.insert_one(doc)
         
         embeddings_docs = [
-            {'file_id': file_id, 'chunk': chunk, '$vector': embedding.tolist()}
+            {'doc_id': doc_id, 'chunk': chunk, '$vector': embedding.tolist()}
             for chunk, embedding in zip(chunks, encoded_chunks)
         ]
         for i in range(0, len(embeddings_docs), 20):
             self._embeddings.insert_many(embeddings_docs[i:i + 20])
 
-    def delete(self, file_id: str):
+    def delete(self, doc_id: str):
         """
-        Delete the file and embeddings documents associated with the given file.
+        Delete the document and embeddings documents associated with the given document.
 
         Args:
-            file_id (str): The ID of the file to delete.
+            doc_id (str): The ID of the document to delete.
         """
-        self._embeddings.delete_many({"file_id": file_id})
-        self._files.delete_one({"_id": file_id})
+        self._embeddings.delete_many({"doc_id": doc_id})
+        self._docs.delete_one({"_id": doc_id})
