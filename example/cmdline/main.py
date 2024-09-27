@@ -2,7 +2,6 @@ import argparse
 import os
 import tempfile
 from pathlib import Path
-import io
 
 from tqdm import tqdm
 
@@ -55,7 +54,7 @@ def search_documents(db, colbert_live, query, k=5):
         top_doc_id, top_page_num = results[0][0]
         page_content = db.get_page_content(top_doc_id, top_page_num)
         print(f"\nMost relevant page (Document ID: {top_doc_id}, Page: {top_page_num}):")
-        image = Image.open(io.BytesIO(page_content))
+        image = Image.frombytes('RGBA', (1, 1), page_content)
         image.show()
     else:
         print("\nNo results found.")
