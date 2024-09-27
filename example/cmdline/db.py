@@ -89,7 +89,7 @@ class CmdlineDB(AstraDB):
         return [torch.tensor(row.embedding) for row in result]
 
     def get_page_content(self, doc_id: uuid.UUID, page_num: int) -> bytes:
-        query = f"SELECT content FROM {self.keyspace}.pages WHERE doc_id = ? AND page_num = ?"
-        result = self.session.execute(query, (doc_id, page_num))
+        query = f"SELECT content FROM {self.keyspace}.pages WHERE doc_id = %s AND page_num = %s"
+        result = self.session.execute(query, [doc_id, page_num])
         row = result.one()
         return row.content if row else None
