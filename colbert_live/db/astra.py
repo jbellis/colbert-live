@@ -51,7 +51,7 @@ def _get_secure_connect_bundle(token: str, db_id: str, verbose: bool = False) ->
     return scb_path
 
 
-class AstraDB(DB):
+class AstraCQL(DB):
     """
     AstraDB implements the ColBERT Live DB interface for Astra databases as well as local Cassandra.
 
