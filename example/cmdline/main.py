@@ -3,6 +3,7 @@ import os
 import tempfile
 from pathlib import Path
 from typing import List, Optional
+import time
 
 from tqdm import tqdm
 
@@ -65,8 +66,11 @@ def add_documents(db, colbert_live, filenames):
 
 
 def search_documents(db, colbert_live, query, k=5):
+    start_time = time.time()
     results = colbert_live.search(query, k=k)
-    print("\nSearch results:")
+    search_time = time.time() - start_time
+    
+    print(f"\nSearch results in {search_time:.3f}s:")
     print("Rank  Score  Page  Document ID")
     for i, (chunk_pk, score) in enumerate(results, 1):
         doc_id, page_num = chunk_pk
