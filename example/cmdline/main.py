@@ -57,7 +57,6 @@ def add_documents(db, colbert_live, filenames):
                 print(f"\nPage {i+1}:")
                 term_image = AutoImage(resized_image)
                 print(term_image)
-            break
 
         doc_id = db.add_record(pngs, all_embeddings)
         print(f"Document '{filename}' {len(pngs)} pages added with ID {doc_id}")
@@ -77,7 +76,7 @@ def search_documents(db, colbert_live, query, k=5):
         print("\nDisplaying top 3 search results:")
         for i, (chunk_id, score) in enumerate(results[:3], 1):
             page = db.get_page_content(chunk_id)
-            image = Image.open(io.BytesIO(page['png_bytes']))
+            image = Image.open(io.BytesIO(page['body']))
             print(f"\nResult {i}:")
             print(f"Document ID: {page['_record_id']}")
             print(f"Page: {page['page_num']}")

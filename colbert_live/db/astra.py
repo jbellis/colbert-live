@@ -295,6 +295,9 @@ class AstraDoc(DB):
         """
         Initialize the AstraDoc class.
 
+        Prefer using 'body' for the chunk content field: AstraDoc harcodes this field name
+        for disabling of full-text search (which would otherwise impose a relatively low length limit.)
+
         Args:
             collection_name (str): The name of the collection to use for top-level records.
         """
@@ -333,7 +336,8 @@ class AstraDoc(DB):
                 {},
                 sort={"$vector": embedding.tolist()},
                 limit=limit,
-                projection={"_chunk_id": 1, "$similarity": 1}
+                projection={"_chunk_id": 1},
+                include_similarity=True
             )
             ann_results.append([(r['_chunk_id'], r['$similarity']) for r in results])
         return ann_results
@@ -346,11 +350,20 @@ class AstraDoc(DB):
                 projection={"_embedding_ids": 1}
             )
             embedding_ids = r['_embedding_ids']
-            results = self._embeddings.find(
-                {"_id": {"$in": embedding_ids}},
-                projection={"$vector": 1}
-            )
-            chunk_results.append([torch.tensor(r['$vector']) for r in results])
+
+            # Split embedding_ids into batches of at most 100
+            batch_size = 100
+            id_batches = [embedding_ids[i:i + batch_size] for i in range(0, len(embedding_ids), batch_size)]
+            
+            chunk_vectors = []
+            for batch in id_batches:
+                results = self._embeddings.find(
+                    {"_id": {"$in": batch}},
+                    projection={"$vector": 1}
+                )
+                chunk_vectors.extend([torch.tensor(r['$vector']) for r in results])
+            
+            chunk_results.append(chunk_vectors)
         return chunk_results
 
     def query_records(self, record_ids: list) -> list[dict]:
@@ -370,14 +383,14 @@ class AstraDoc(DB):
         for chunk, chunk_embeddings in zip(chunks, all_embeddings):
             chunk['_id'] = uuid4()
             chunk['_record_id'] = record['_id']
-            embedding_docs = [{'_id': uuid4(), 'chunk_id': chunk['_id'], '$vector': embedding.tolist()}
+            embedding_docs = [{'_id': uuid4(), '_chunk_id': chunk['_id'], '$vector': embedding.tolist()}
                               for embedding in chunk_embeddings]
             chunk['_embedding_ids'] = [doc['_id'] for doc in embedding_docs]
-            print(embedding_docs[0])
             self._embeddings.insert_many(embedding_docs)
         record['_chunk_ids'] = [chunk['_id'] for chunk in chunks]
 
-        self._chunks.insert_many(chunks)
+        # insert the chunks one at a time to avoid 413 Request Entity Too Large
+        self._chunks.insert_many(chunks, chunk_size=1)
         self._records.insert_one(record)
 
     def delete(self, record_id):
