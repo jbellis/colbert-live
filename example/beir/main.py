@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from itertools import cycle
@@ -8,11 +9,13 @@ from beir import util
 from more_itertools import chunked
 from beir.datasets.data_loader import GenericDataLoader
 from beir.retrieval.evaluation import EvaluateRetrieval
+
+from colbert_live.models import Model
 from example.util import execute_concurrent_async
 from tqdm import tqdm
 
 from colbert_live import ColbertLive
-from .db import AstraDBBeir
+from .db import BeirDB
 
 #
 # Because we're importing `util` from the parent example module, you should run this script
@@ -106,34 +109,26 @@ def evaluate_model(qrels: dict, results: dict):
             evaluation_results[f"{k}"] = score
     return evaluation_results
 
-def test_all():
-    for dataset, tokens_per_query in [
-        ('scifact', 48),
-        ('nfcorpus', 32),
-        ('scidocs', 48),
-        ('trec-covid', 48),
-        ('fiqa', 32),
-        ('arguana', 64),
-        ('quora', 32)
-    ]:
-        for doc_pool_factor in [1, 2, 3, 4]:
+def test_all(datasets):
+    for dataset, tokens_per_query in datasets:
+        for doc_pool_factor in [2]:
             model_name = 'answerdotai/answerai-colbert-small-v1'
             ks_name = dataset.replace('-', '') + 'aaiv1'
             if doc_pool_factor > 1:
                 ks_name += f'pool{doc_pool_factor}'
-            db = AstraDBBeir(ks_name, model_name, os.environ.get('ASTRA_DB_ID'), os.environ.get('ASTRA_DB_TOKEN'))
 
-            colbert_live = ColbertLive(db, model_name, doc_pool_factor=doc_pool_factor)
+            model = Model.from_name_or_path(model_name, tokens_per_query=tokens_per_query)
+            db = BeirDB(ks_name, model.dim, os.environ.get('ASTRA_DB_ID'), os.environ.get('ASTRA_DB_TOKEN'))
+            colbert_live = ColbertLive(db, model, doc_pool_factor=doc_pool_factor)
             corpus, queries, qrels = download_and_load_dataset(dataset)
             compute_and_store_embeddings(corpus, db, colbert_live)
 
             for query_pool_distance in [0.03]:
-                for n_ann_docs in [120, 240, 360]:
-                    for n_maxsim_candidates in [20, 40, 60, 80]:
+                for n_ann_docs in [240]:
+                    for n_maxsim_candidates in [20]:
                         print(f'{dataset} @ {tokens_per_query} TPQ from keyspace {ks_name}, query pool distance {query_pool_distance}, CL {n_ann_docs}:{n_maxsim_candidates}')
 
-                        colbert_live = ColbertLive(db, model_name, query_pool_distance=query_pool_distance,
-                                                   tokens_per_query=tokens_per_query)
+                        colbert_live = ColbertLive(db, model, query_pool_distance=query_pool_distance)
                         results = search_and_benchmark(queries, n_ann_docs, n_maxsim_candidates, colbert_live)
                         evaluation_results = evaluate_model(qrels, results)
                         for k, score in evaluation_results.items():
@@ -141,4 +136,25 @@ def test_all():
 
 
 if __name__ == "__main__":
-    test_all()
+    all_datasets = [
+        ('scifact', 48),
+        ('nfcorpus', 32),
+        ('scidocs', 48),
+        ('trec-covid', 48),
+        ('fiqa', 32),
+        ('arguana', 64),
+        ('quora', 32),
+    ]
+
+    if len(sys.argv) > 1:
+        dataset_dict = {name: tpq for name, tpq in all_datasets}
+        requested_datasets = sys.argv[1:]
+        datasets_to_run = [(name, dataset_dict[name]) for name in requested_datasets if name in dataset_dict]
+        unrecognized_datasets = [name for name in requested_datasets if name not in dataset_dict]
+        if unrecognized_datasets:
+            print(f"Skipping unrecognized datasets: {', '.join(unrecognized_datasets)}")
+    else:
+        datasets_to_run = all_datasets
+
+    print(f"Testing datasets: {', '.join(name for name, _ in datasets_to_run)}")
+    test_all(datasets_to_run)
