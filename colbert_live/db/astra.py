@@ -336,7 +336,7 @@ class AstraDoc(DB):
     def query_ann(self, embeddings: torch.Tensor, limit: int) -> list[list[tuple[UUID, float]]]:
         ann_results = []
         for embedding in embeddings:
-            results = self._embeddings.find(
+            results = self._embeddings.to_sync().find(
                 {},
                 sort={"$vector": embedding.tolist()},
                 limit=limit,
@@ -360,11 +360,12 @@ class AstraDoc(DB):
                 batch_size = 100
                 id_batches = [embedding_ids[i:i + batch_size] for i in range(0, len(embedding_ids), batch_size)]
                 async def fetch_batch(batch):
-                    results = await self._embeddings.find(
+                    cursor = self._embeddings.find(
                         {"_id": {"$in": batch}},
                         projection={"$vector": 1}
                     )
-                    return [torch.tensor(r['$vector']) for r in results]
+                    _ = cursor.__aiter__()
+                    return cursor
                 embeddings_batches.append([fetch_batch(batch) for batch in id_batches])
             flattened_batches = list(chain.from_iterable(embeddings_batches))
             flattened_results = await asyncio.gather(*flattened_batches)
@@ -373,11 +374,12 @@ class AstraDoc(DB):
             index = 0
             final_results = []
             for batches in embeddings_batches:
-                batch_results = []
+                chunk_results = []
                 for _ in batches:
-                    batch_results.append(flattened_results[index])
+                    batch_results = flattened_results[index]
+                    chunk_results.extend(torch.tensor(r['$vector']) for r in batch_results)
                     index += 1
-                final_results.append(list(chain.from_iterable(batch_results)))
+                final_results.append(chunk_results)
 
             return final_results
 
