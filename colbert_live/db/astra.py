@@ -296,18 +296,18 @@ class AstraDoc(DB):
         Initialize the AstraDoc class.
 
         Args:
-            collection_name (str): The name of the collection to use for documents.
+            collection_name (str): The name of the collection to use for top-level records.
         """
         self._client = DataAPIClient(token=os.environ["ASTRA_DB_TOKEN"])
         self._db = self._client.get_database(os.environ["ASTRA_DB_ID"])
-        self._docs = None
+        self._records = None
         chunks_collection_name = f"{collection_name}_chunks"
         embeddings_collection_name = f"{collection_name}_embeddings"
         collections = set(c.name for c in self._db.list_collections())
         if collection_name in collections:
-            self._docs = self._db[collection_name]
+            self._records = self._db[collection_name]
         else:
-            self._docs = self._db.create_collection(collection_name)
+            self._records = self._db.create_collection(collection_name)
         if chunks_collection_name in collections:
             self._chunks = self._db[chunks_collection_name]
         else:
@@ -353,38 +353,39 @@ class AstraDoc(DB):
             chunk_results.append([torch.tensor(r['$vector']) for r in results])
         return chunk_results
 
-    def insert(self, document: dict, chunks: list[dict], embeddings: list[torch.Tensor]):
+    def insert(self, record: dict, chunks: list[dict], embeddings: list[torch.Tensor]):
         """
-        Insert the document, chunks, and embeddings associated with the given document.
+        Insert the record, chunks, and embeddings associated with the given record.
 
         Args:
-            document: The document to insert; all items in the dict will be stored as fields.
-                      Must contain an '_id' field of any type.
-            chunks (list): The chunks of the document; all items in each dict will be stored as fields
+            record: The record to insert; all items in the dict will be stored as fields.
+                    Must contain an '_id' field of any type.
+            chunks (list): The chunks of the record; all items in each dict will be stored as fields
                            with a generated ID
             embeddings (list[torch.Tensor]): a 2D tensor of embeddings per chunk
         """
         for chunk, embedding_tensors in zip(chunks, embeddings):
             chunk['_id'] = uuid4()
+            chunk['_record_id'] = record['_id']
             embedding_docs = [{'_id': uuid4(), 'chunk_id': chunk['_id'], '$vector': embedding.tolist()}
                               for embedding in embeddings]
             chunk['_embedding_ids'] = [doc['_id'] for doc in embedding_docs]
             self._embeddings.many(embedding_docs)
-        document['_chunk_ids'] = [chunk['_id'] for chunk in chunks]
+        record['_chunk_ids'] = [chunk['_id'] for chunk in chunks]
 
         self._chunks.insert_many(chunks)
-        self._docs.insert_one(document)
+        self._records.insert_one(record)
 
-    def delete(self, doc_id):
+    def delete(self, record_id):
         """
-        Delete the document, chunks, and embeddings associated with the given document.
+        Delete the record, chunks, and embeddings associated with the given record.
 
         Args:
-            doc_id: The ID of the document to delete.
+            record_id: The ID of the record to delete.
         """
-        doc = self._docs.find_one({"_id": doc_id})
-        chunks = self._chunks.find({"_id": {"$in": doc['_chunk_ids']}})
+        record = self._records.find_one({"_id": record_id})
+        chunks = self._chunks.find({"_id": {"$in": record['_chunk_ids']}})
         all_embedding_ids = list(chain.from_iterable(chunk['_embedding_ids'] for chunk in chunks))
         self._embeddings.delete_many({"_id": {"$in": all_embedding_ids}})
-        self._chunks.delete_many({"_id": {"$in": doc['_chunk_ids']}})
-        self._docs.delete_one({"_id": doc_id})
+        self._chunks.delete_many({"_id": {"$in": record['_chunk_ids']}})
+        self._records.delete_one({"_id": record_id})
