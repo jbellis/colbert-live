@@ -364,8 +364,7 @@ class AstraDoc(DB):
                         {"_id": {"$in": batch}},
                         projection={"$vector": 1}
                     )
-                    _ = cursor.__aiter__()
-                    return cursor
+                    return [doc async for doc in cursor]
                 embeddings_batches.append([fetch_batch(batch) for batch in id_batches])
             flattened_batches = list(chain.from_iterable(embeddings_batches))
             flattened_results = await asyncio.gather(*flattened_batches)
