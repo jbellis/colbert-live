@@ -292,7 +292,7 @@ class AstraCQL(DB):
 
 
 class AstraDoc(DB):
-    def __init__(self, collection_name: str, embedding_dim: int):
+    def __init__(self, collection_name: str, embedding_dim: int, async_loop=None):
         """
         Initialize the AstraDoc class.
 
@@ -332,6 +332,8 @@ class AstraDoc(DB):
         self._records = self._records.to_async()
         self._chunks = self._chunks.to_async()
         self._embeddings = self._embeddings.to_async()
+
+        self.loop = async_loop if async_loop else asyncio.new_event_loop()
 
     def query_ann(self, embeddings: torch.Tensor, limit: int) -> list[list[tuple[UUID, float]]]:
         ann_results = []
@@ -382,7 +384,7 @@ class AstraDoc(DB):
 
             return final_results
 
-        return asyncio.run(query_chunks_async())
+        return self.loop.run_until_complete(query_chunks_async())
 
     def query_records(self, record_ids: list) -> list[dict]:
         return list(self._records.find({"_id": {"$in": record_ids}}))

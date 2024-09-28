@@ -32,5 +32,4 @@ class CmdlineDB(AstraDoc):
                     page['body'] = base64.b64decode(page['body'])
             return pages
 
-        return asyncio.run(get_page_content_async())
-
+        return self.loop.run_until_complete(get_page_content_async())
