@@ -58,22 +58,49 @@ def _get_secure_connect_bundle(token: str, db_id: str, verbose: bool = False) ->
 
 class AstraCQL(DB):
     """
-    AstraDB implements the ColBERT Live DB interface for Astra databases as well as local Cassandra.
+    AstraCQL implements the ColBERT Live DB interface for Astra databases as well as local Cassandra.
+
+    This class provides a foundation for creating application-specific implementations.
+    Subclasses should override the prepare, process_ann_rows, and process_chunk_rows methods
+    to customize the behavior for their specific use case.
 
     Args:
-        keyspace (str): The keyspace to use in the database.  AstraDB will create it if it doesn't exist
-        embedding_dim (int): The dimension of the ColBERT embeddings
-        astra_db_id (Optional[str]): The Astra database ID (required for Astra connections)
-        astra_token (Optional[str]): The Astra authentication token (required for Astra connections)
-        verbose (bool): If True, print verbose output
+        keyspace (str): The keyspace to use in the database. AstraCQL will create it if it doesn't exist.
+        embedding_dim (int): The dimension of the ColBERT embeddings.
+        astra_db_id (Optional[str]): The Astra database ID (required for Astra connections).
+        astra_token (Optional[str]): The Astra authentication token (required for Astra connections).
+        verbose (bool): If True, print verbose output.
+
+    Attributes:
+        session: The database session object.
+        query_ann_stmt: The prepared statement for ANN queries.
+        query_chunks_stmt: The prepared statement for chunk queries.
 
     Subclasses must implement:
-    - prepare: Set up necessary database statements and perform any required schema manipulation
-    - process_ann_rows: Process the results of the ANN query
-    - process_chunk_rows: Process the results of the chunk query
+    - prepare: Set up necessary database statements and perform any required table manipulation.
+    - process_ann_rows: Process the results of the ANN query.
+    - process_chunk_rows: Process the results of the chunk query.
+    See the docstrings of these methods for details.
+
+    Example usage in a subclass:
+        class MyDB(AstraCQL):
+            def prepare(self, embedding_dim):
+                # Create tables and indexes
+                self.session.execute(f"CREATE TABLE IF NOT EXISTS ...")
+                self.session.execute(f"CREATE CUSTOM INDEX IF NOT EXISTS ...")
+                
+                # Prepare statements
+                self.query_ann_stmt = self.session.prepare(f"SELECT ... ORDER BY ... ANN OF ...")
+                self.query_chunks_stmt = self.session.prepare(f"SELECT ... WHERE ...")
+
+            def process_ann_rows(self, result):
+                return [(row.primary_key, row.similarity) for row in result]
+
+            def process_chunk_rows(self, result):
+                return [torch.tensor(row.embedding) for row in result]
 
     Raises:
-        Exception: If Astra credentials are incomplete or connection fails
+        Exception: If Astra credentials are incomplete or connection fails.
     """
     def __init__(self,
                  keyspace: str,
@@ -100,20 +127,39 @@ class AstraCQL(DB):
 
     def prepare(self, embedding_dim: int):
         """
-        Prepare two statements for querying the database:
-        - query_colbert_ann_stmt
-          - three parameters: [embedding, embedding, limit]
-          - resultset: [(pk, similarity)]
-          Example: `SELECT pk, similarity_cosine(embedding, ?) FROM table ORDER BY ? ANN OF column_name LIMIT ?`
-        - query_colbert_chunks_stmt
-          - one parameter: [pk]
-          - resultset: [embedding] (multiple rows per pk)
-          Example: `SELECT embedding FROM table WHERE pk = ?`
+        Prepare the database schema and query statements.  AstraCQL creates the keyspace if necessary;
+        everything else is up to you.
 
-        The results of these queries will be processed by process_ann_rows and process_chunk_rows, respectively.
-        MAKE SURE that compound primary keys are represented as tuples, or `query_ann` will fail.
+        This method should be implemented by subclasses to set up the necessary
+        database structure and prepare statements for querying.
 
-        Other idempotent initialization logic (e.g. schema manipulation) may also be done here.
+        Args:
+            embedding_dim (int): The dimension of the ColBERT embeddings.
+
+        Expected implementations:
+        1. Create required tables (if not exists)
+        2. Create necessary indexes (if not exists)
+        3. Prepare two main statements:
+           a) query_ann_stmt: For approximate nearest neighbor search
+              - Parameters: [query_embedding, query_embedding, limit]
+              - Expected result: [(primary_key, similarity)]
+              Example:
+                SELECT pk, similarity_cosine(embedding, ?) AS similarity
+                FROM table
+                ORDER BY embedding ANN OF ?
+                LIMIT ?
+
+           b) query_chunks_stmt: For retrieving embeddings by primary key
+              - Parameters: [primary_key]
+              - Expected result: [embedding]
+              Example:
+                SELECT embedding
+                FROM table
+                WHERE pk = ?
+
+        Note:
+        - Ensure that compound primary keys are represented as tuples in the results.
+        - The results of these queries will be processed by process_ann_rows and process_chunk_rows, respectively.
         """
         self.query_ann_stmt = None
         self.query_chunks_stmt = None
@@ -121,13 +167,39 @@ class AstraCQL(DB):
 
     def process_ann_rows(self, result: ResultSet) -> list[tuple[Any, float]]:
         """
-        Turn a resultset from query_colbert_ann_stmt, into a list of (pk, similarity) tuples.
+        Process the result of the ANN query into a list of (primary_key, similarity) tuples.
+
+        Args:
+            result (ResultSet): The result set from the ANN query.
+
+        Returns:
+            List[Tuple[Any, float]]: A list of tuples, each containing a primary key and its similarity score.
+
+        Example implementation:
+            return [(row.primary_key, row.similarity) for row in result]
+
+        Note:
+        - The primary_key should match the structure used in your database schema.
+        - For compound primary keys, return them as tuples, e.g., (doc_id, page_num).
         """
         raise NotImplementedError('Subclasses must implement process_ann_rows')
 
-    def process_chunk_rows(self, result: ResultSet) -> list[torch.Tensor]:
+    def process_chunk_rows(self, result: ResultSet) -> List[torch.Tensor]:
         """
-        Turn a resultset from query_colbert_chunks_stmt, into a list of embeddings.
+        Process the result of the chunk query into a list of embedding tensors.
+
+        Args:
+            result (ResultSet): The result set from the chunk query.
+
+        Returns:
+            List[torch.Tensor]: A list of embedding tensors.
+
+        Example implementation:
+            return [torch.tensor(row.embedding) for row in result]
+
+        Note:
+        - Ensure that the returned tensors match the expected embedding dimension.
+        - If your database stores embeddings in a different format, convert them to torch.Tensor here.
         """
         raise NotImplementedError('Subclasses must implement process_chunk_rows')
 
