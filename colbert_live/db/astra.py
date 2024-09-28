@@ -336,17 +336,21 @@ class AstraDoc(DB):
         self.loop = async_loop if async_loop else asyncio.new_event_loop()
 
     def query_ann(self, embeddings: torch.Tensor, limit: int) -> list[list[tuple[UUID, float]]]:
-        ann_results = []
-        for embedding in embeddings:
-            results = self._embeddings.to_sync().find(
+        async def find_async(embedding):
+            cursor = self._embeddings.find(
                 {},
                 sort={"$vector": embedding.tolist()},
                 limit=limit,
                 projection={"_chunk_id": 1},
                 include_similarity=True
             )
-            ann_results.append([(r['_chunk_id'], r['$similarity']) for r in results])
-        return ann_results
+            return [r async for r in cursor]
+
+        async def query_ann_async():
+            batch = [find_async(embedding) for embedding in embeddings]
+            results = await asyncio.gather(*batch)
+            return [[(r['_chunk_id'], r['$similarity']) for r in result] for result in results]
+        return self.loop.run_until_complete(query_ann_async())
 
     def query_chunks(self, chunk_ids: List[UUID]) -> List[List[torch.Tensor]]:
         async def query_chunks_async():
@@ -361,13 +365,13 @@ class AstraDoc(DB):
             for chunk_id, embedding_ids in zip(chunk_ids, all_embedding_ids):
                 batch_size = 100
                 id_batches = [embedding_ids[i:i + batch_size] for i in range(0, len(embedding_ids), batch_size)]
-                async def fetch_batch(batch):
+                async def find_async(ids):
                     cursor = self._embeddings.find(
-                        {"_id": {"$in": batch}},
+                        {"_id": {"$in": ids}},
                         projection={"$vector": 1}
                     )
-                    return [doc async for doc in cursor]
-                embeddings_batches.append([fetch_batch(batch) for batch in id_batches])
+                    return [r async for r in cursor]
+                embeddings_batches.append([find_async(ids) for ids in id_batches])
             flattened_batches = list(chain.from_iterable(embeddings_batches))
             flattened_results = await asyncio.gather(*flattened_batches)
 
