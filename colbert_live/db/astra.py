@@ -1,24 +1,17 @@
+import json
+import os
 import time
 import urllib.error
-import urllib.request
-from typing import Optional, Any
-
-import torch
-from cassandra.auth import PlainTextAuthProvider
-from cassandra.cluster import Cluster, ResultSet
-from cassandra.concurrent import execute_concurrent_with_args
-from cassandra.policies import ExponentialReconnectionPolicy
-
-import json
-
-from .db import DB
-import json
-import time
 import urllib.error
 import urllib.request
+import urllib.request
+from itertools import chain
+from typing import List, Tuple
 from typing import Optional, Any
+from uuid import UUID, uuid4
 
 import torch
+from astrapy import DataAPIClient
 from cassandra.auth import PlainTextAuthProvider
 from cassandra.cluster import Cluster, ResultSet
 from cassandra.concurrent import execute_concurrent_with_args
@@ -223,16 +216,10 @@ class AstraCQL(DB):
             """
             self.session.execute(create_keyspace_query)
             if self.verbose: print(f"Keyspace '{self.keyspace}' created or verified")
-import os
-from typing import List, Any, Tuple
-import torch
-from astrapy import DataAPIClient
-from astrapy.constants import VectorMetric
 
-from .db import DB
 
 class AstraDoc(DB):
-    def __init__(self, collection_name: str):
+    def __init__(self, collection_name: str, embedding_dim: int):
         """
         Initialize the AstraDoc class.
 
@@ -241,105 +228,91 @@ class AstraDoc(DB):
         """
         self._client = DataAPIClient(token=os.environ["ASTRA_DB_TOKEN"])
         self._db = self._client.get_database(os.environ["ASTRA_DB_ID"])
-        self._embeddings = None
         self._docs = None
-        self._init_collections(collection_name)
-
-    def _init_collections(self, collection_name: str):
-        """
-        Initialize the embeddings and documents collections.
-
-        Args:
-            collection_name (str): The name for the documents collection.
-        """
+        chunks_collection_name = f"{collection_name}_chunks"
         embeddings_collection_name = f"{collection_name}_embeddings"
-        
         collections = set(c.name for c in self._db.list_collections())
-
+        if collection_name in collections:
+            self._docs = self._db[collection_name]
+        else:
+            self._docs = self._db.create_collection(collection_name)
+        if chunks_collection_name in collections:
+            self._chunks = self._db[chunks_collection_name]
+        else:
+            self._chunks = self._db.create_collection(
+                chunks_collection_name,
+                indexing={'deny': ['body']},
+            )
+        # Ideally, the embeddings would just be a list in the chunks collection,
+        # but Astra doesn't know how to index a list of vectors yet
         if embeddings_collection_name in collections:
             self._embeddings = self._db[embeddings_collection_name]
         else:
             self._embeddings = self._db.create_collection(
                 embeddings_collection_name,
-                indexing={'deny': ['chunk']},
-                dimension=768,
-                metric=VectorMetric.COSINE
+                dimension=embedding_dim,
+                # TODO source_model isn't exposed yet
             )
 
-        if collection_name in collections:
-            self._docs = self._db[collection_name]
-        else:
-            self._docs = self._db.create_collection(collection_name)
-
-    def query_ann(self, embeddings: torch.Tensor, limit: int) -> List[List[Tuple[Any, float]]]:
-        """
-        Perform an approximate nearest neighbor (ANN) search of the ColBERT embeddings.
-
-        Args:
-            embeddings (torch.Tensor): A tensor of ColBERT embeddings to compare against.
-            limit (int): The maximum number of results to return for each embedding.
-
-        Returns:
-            List[List[Tuple[Any, float]]]: A list of lists, one per embedding, where each inner list
-            contains tuples of (doc_id, similarity) for the chunks closest to each query embedding.
-        """
-        results = []
+    def query_ann(self, embeddings: torch.Tensor, limit: int) -> List[List[Tuple[UUID, float]]]:
+        ann_results = []
         for embedding in embeddings:
-            query_result = self._embeddings.find(
+            results = self._embeddings.find(
                 {},
                 sort={"$vector": embedding.tolist()},
                 limit=limit,
-                projection={"doc_id": 1, "_id": 0}
+                projection={"_chunk_id": 1, "$similarity": 1}
             )
-            results.append([(doc['doc_id'], doc['$similarity']) for doc in query_result])
-        return results
+            ann_results.append([(r['_chunk_id'], r['$similarity']) for r in results])
+        return ann_results
 
-    def query_chunks(self, doc_ids: List[Any]) -> List[List[torch.Tensor]]:
-        """
-        Retrieve all ColBERT embeddings for specific chunks.
-
-        Args:
-            doc_ids (List[Any]): A list of document IDs identifying the chunks.
-
-        Returns:
-            List[List[torch.Tensor]]: A list of lists of PyTorch tensors representing
-            the ColBERT embeddings for each of the specified chunks.
-        """
-        results = []
-        for doc_id in doc_ids:
-            chunks = self._embeddings.find(
-                {"doc_id": doc_id},
-                projection={"$vector": 1, "_id": 0}
+    def query_chunks(self, chunk_ids: List[UUID]) -> List[List[torch.Tensor]]:
+        chunk_results = []
+        for chunk_id in chunk_ids:
+            r = self._chunks.find_one(
+                {"_id": chunk_id},
+                projection={"_embedding_ids": 1}
             )
-            results.append([torch.tensor(doc['$vector']) for doc in chunks])
-        return results
+            embedding_ids = r['_embedding_ids']
+            results = self._embeddings.find(
+                {"_id": {"$in": embedding_ids}},
+                projection={"$vector": 1}
+            )
+            chunk_results.append([torch.tensor(r['$vector']) for r in results])
+        return chunk_results
 
-    def insert(self, doc_id: str, full_path: str, chunks: List[str], encoded_chunks: List[torch.Tensor]):
+    def insert(self, document: dict, chunks: list[dict], embeddings: list[torch.Tensor]):
         """
-        Insert the document and embeddings documents associated with the given document.
-
-        Args:
-            doc_id (str): The ID of the document.
-            full_path (str): The full path of the document.
-            chunks (List[str]): The text chunks of the document.
-            encoded_chunks (List[torch.Tensor]): The encoded chunks as tensors.
-        """
-        doc = {"_id": doc_id, "path": full_path}
-        self._docs.insert_one(doc)
-        
-        embeddings_docs = [
-            {'doc_id': doc_id, 'chunk': chunk, '$vector': embedding.tolist()}
-            for chunk, embedding in zip(chunks, encoded_chunks)
-        ]
-        for i in range(0, len(embeddings_docs), 20):
-            self._embeddings.insert_many(embeddings_docs[i:i + 20])
-
-    def delete(self, doc_id: str):
-        """
-        Delete the document and embeddings documents associated with the given document.
+        Insert the document, chunks, and embeddings associated with the given document.
 
         Args:
-            doc_id (str): The ID of the document to delete.
+            document: The document to insert; all items in the dict will be stored as fields.
+                      Must contain an '_id' field of any type.
+            chunks (list): The chunks of the document; all items in each dict will be stored as fields
+                           with a generated ID
+            embeddings (list[torch.Tensor]): a 2D tensor of embeddings per chunk
         """
-        self._embeddings.delete_many({"doc_id": doc_id})
+        for chunk, embedding_tensors in zip(chunks, embeddings):
+            chunk['_id'] = uuid4()
+            embedding_docs = [{'_id': uuid4(), 'chunk_id': chunk['_id'], '$vector': embedding.tolist()}
+                              for embedding in embeddings]
+            chunk['_embedding_ids'] = [doc['_id'] for doc in embedding_docs]
+            self._embeddings.many(embedding_docs)
+        document['_chunk_ids'] = [chunk['_id'] for chunk in chunks]
+
+        self._chunks.insert_many(chunks)
+        self._docs.insert_one(document)
+
+    def delete(self, doc_id):
+        """
+        Delete the document, chunks, and embeddings associated with the given document.
+
+        Args:
+            doc_id: The ID of the document to delete.
+        """
+        doc = self._docs.find_one({"_id": doc_id})
+        chunks = self._chunks.find({"_id": {"$in": doc['_chunk_ids']}})
+        all_embedding_ids = list(chain.from_iterable(chunk['_embedding_ids'] for chunk in chunks))
+        self._embeddings.delete_many({"_id": {"$in": all_embedding_ids}})
+        self._chunks.delete_many({"_id": {"$in": doc['_chunk_ids']}})
         self._docs.delete_one({"_id": doc_id})
