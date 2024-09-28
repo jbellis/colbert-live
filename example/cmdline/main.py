@@ -73,14 +73,9 @@ def search_documents(db, colbert_live, query, k=5):
         print(chunk_id)
 
     if results:
-        print("\nDisplaying top 3 search results:")
-        for i, (chunk_id, score) in enumerate(results[:3], 1):
-            page = db.get_page_content(chunk_id)
+        print("\nDisplaying top 3 search results in separate window")
+        for page in db.get_page_content([chunk_id for chunk_id, _ in results[:3]]):
             image = Image.open(io.BytesIO(page['body']))
-            print(f"\nResult {i}:")
-            print(f"Document ID: {page['_record_id']}")
-            print(f"Page: {page['page_num']}")
-            print(f"Score: {score:.3f}")
             image.show()
     else:
         print("\nNo results found.")

@@ -1,3 +1,5 @@
+import asyncio
+from typing import Any
 from uuid import uuid4, UUID
 import base64
 
@@ -21,7 +23,14 @@ class CmdlineDB(AstraDoc):
         self.insert(record, chunks, embeddings)
         return doc_id
 
-    def get_page_content(self, chunk_id: UUID) -> bytes:
-        page = self._chunks.find_one({'_id': chunk_id})
-        page['body'] = base64.b64decode(page['body'])
-        return page
+    def get_page_content(self, chunk_ids: list[UUID]) -> list[Any]:
+        async def get_page_content_async():
+            tasks = [self._chunks.find_one({'_id': chunk_id}) for chunk_id in chunk_ids]
+            pages = await asyncio.gather(*tasks)
+            for page in pages:
+                if page:
+                    page['body'] = base64.b64decode(page['body'])
+            return pages
+
+        return asyncio.run(get_page_content_async())
+
