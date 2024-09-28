@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import time
@@ -328,9 +329,13 @@ class AstraDoc(DB):
                 dimension=embedding_dim,
                 # TODO source_model isn't exposed yet
             )
+        self._records = self._records.to_async()
+        self._chunks = self._chunks.to_async()
+        self._embeddings = self._embeddings.to_async()
 
     def query_ann(self, embeddings: torch.Tensor, limit: int) -> List[List[Tuple[UUID, float]]]:
         ann_results = []
+        # TODO
         for embedding in embeddings:
             results = self._embeddings.find(
                 {},
@@ -343,18 +348,17 @@ class AstraDoc(DB):
         return ann_results
 
     def query_chunks(self, chunk_ids: List[UUID]) -> List[List[torch.Tensor]]:
+        chunk_tasks = [self._chunks.find_one({"_id": chunk_id}, projection={"_embedding_ids": 1})
+                       for chunk_id in chunk_ids]
+
         chunk_results = []
-        for chunk_id in chunk_ids:
-            r = self._chunks.find_one(
-                {"_id": chunk_id},
-                projection={"_embedding_ids": 1}
-            )
+        for chunk_id, r in zip(chunk_ids, asyncio.run(asyncio.gather(chunk_tasks))):
             embedding_ids = r['_embedding_ids']
 
             # Split embedding_ids into batches of at most 100
+            # TODO make this async
             batch_size = 100
             id_batches = [embedding_ids[i:i + batch_size] for i in range(0, len(embedding_ids), batch_size)]
-            
             chunk_vectors = []
             for batch in id_batches:
                 results = self._embeddings.find(
