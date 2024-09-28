@@ -291,14 +291,6 @@ class AstraCQL(DB):
             if self.verbose: print(f"Keyspace '{self.keyspace}' created or verified")
 
 
-def _get_event_loop():
-    try:
-        loop = asyncio.get_event_loop()
-    except RuntimeError:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-    return loop
-
 class AstraDoc(DB):
     def __init__(self, collection_name: str, embedding_dim: int):
         """
@@ -390,7 +382,7 @@ class AstraDoc(DB):
 
             return final_results
 
-        return _get_event_loop().run_until_complete(query_chunks_async())
+        return asyncio.run(query_chunks_async())
 
     def query_records(self, record_ids: list) -> list[dict]:
         return list(self._records.find({"_id": {"$in": record_ids}}))
