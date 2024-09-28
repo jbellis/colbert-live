@@ -353,7 +353,10 @@ class AstraDoc(DB):
             chunk_results.append([torch.tensor(r['$vector']) for r in results])
         return chunk_results
 
-    def insert(self, record: dict, chunks: list[dict], embeddings: list[torch.Tensor]):
+    def query_records(self, record_ids: list) -> list[dict]:
+        return list(self._records.find({"_id": {"$in": record_ids}}))
+
+    def insert(self, record: dict, chunks: list[dict], all_embeddings: list[torch.Tensor]):
         """
         Insert the record, chunks, and embeddings associated with the given record.
 
@@ -362,15 +365,16 @@ class AstraDoc(DB):
                     Must contain an '_id' field of any type.
             chunks (list): The chunks of the record; all items in each dict will be stored as fields
                            with a generated ID
-            embeddings (list[torch.Tensor]): a 2D tensor of embeddings per chunk
+            all_embeddings (list[torch.Tensor]): a 2D tensor of embeddings per chunk
         """
-        for chunk, embedding_tensors in zip(chunks, embeddings):
+        for chunk, chunk_embeddings in zip(chunks, all_embeddings):
             chunk['_id'] = uuid4()
             chunk['_record_id'] = record['_id']
             embedding_docs = [{'_id': uuid4(), 'chunk_id': chunk['_id'], '$vector': embedding.tolist()}
-                              for embedding in embeddings]
+                              for embedding in chunk_embeddings]
             chunk['_embedding_ids'] = [doc['_id'] for doc in embedding_docs]
-            self._embeddings.many(embedding_docs)
+            print(embedding_docs[0])
+            self._embeddings.insert_many(embedding_docs)
         record['_chunk_ids'] = [chunk['_id'] for chunk in chunks]
 
         self._chunks.insert_many(chunks)

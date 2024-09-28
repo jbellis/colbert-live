@@ -57,11 +57,9 @@ def add_documents(db, colbert_live, filenames):
                 print(f"\nPage {i+1}:")
                 term_image = AutoImage(resized_image)
                 print(term_image)
+            break
 
-        doc_id = db.add_documents(pngs)  # Create a new document ID
-        for page_num, embeddings in enumerate(all_embeddings, start=1):
-            db.add_embeddings(doc_id, page_num, embeddings)
-
+        doc_id = db.add_record(pngs, all_embeddings)
         print(f"Document '{filename}' {len(pngs)} pages added with ID {doc_id}")
 
 
@@ -72,26 +70,19 @@ def search_documents(db, colbert_live, query, k=5):
     
     print(f"\nSearch results in {search_time:.3f}s:")
     print("Rank  Score  Page  Document ID")
-    for i, (chunk_pk, score) in enumerate(results, 1):
-        doc_id, page_num = chunk_pk
-        print(f"{i:<4}  {score:.3f}  {page_num:<4}  {doc_id}")
+    for i, (chunk_id, score) in enumerate(results, 1):
+        print(chunk_id)
 
     if results:
         print("\nDisplaying top 3 search results:")
-        for i, ((doc_id, page_num), score) in enumerate(results[:3], 1):
-            page_content = db.get_page_content(doc_id, page_num)
-            if page_content:
-                try:
-                    image = Image.open(io.BytesIO(page_content))
-                    print(f"\nResult {i}:")
-                    print(f"Document ID: {doc_id}")
-                    print(f"Page: {page_num}")
-                    print(f"Score: {score:.3f}")
-                    image.show()
-                except Exception as e:
-                    print(f"Error displaying image for result {i}: {e}")
-            else:
-                print(f"\nResult {i}: Error: Page content is empty")
+        for i, (chunk_id, score) in enumerate(results[:3], 1):
+            page = db.get_page_content(chunk_id)
+            image = Image.open(io.BytesIO(page['png_bytes']))
+            print(f"\nResult {i}:")
+            print(f"Document ID: {page['_record_id']}")
+            print(f"Page: {page['page_num']}")
+            print(f"Score: {score:.3f}")
+            image.show()
     else:
         print("\nNo results found.")
 
@@ -110,10 +101,7 @@ def main():
     args = parser.parse_args()
 
     model = Model.from_name_or_path('vidore/colpali-v1.2')
-    db = CmdlineDB('colpali',
-                   model.dim,
-                   os.environ.get('ASTRA_DB_ID'),
-                   os.environ.get('ASTRA_DB_TOKEN'))
+    db = CmdlineDB('colpali', model.dim)
     colbert_live = ColbertLive(db, model)
 
     if args.command == "add":
