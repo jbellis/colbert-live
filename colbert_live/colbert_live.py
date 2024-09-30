@@ -7,7 +7,7 @@ import torch
 from colbert.modeling.checkpoint import pool_embeddings_hierarchical
 from sklearn.cluster import AgglomerativeClustering
 
-from models import Model
+from .models import Model
 from .db import DB
 
 
