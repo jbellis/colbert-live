@@ -1,15 +1,13 @@
 import math
-from typing import List, Dict, Any, Optional
+from typing import List, Any, Optional
 from typing import Tuple
 
 import numpy as np
 import torch
-from colbert.indexing.collection_encoder import CollectionEncoder
-from colbert.infra.config import ColBERTConfig
-from colbert.modeling.checkpoint import Checkpoint, pool_embeddings_hierarchical
-from colbert.modeling.colbert import colbert_score_packed
+from colbert.modeling.checkpoint import pool_embeddings_hierarchical
 from sklearn.cluster import AgglomerativeClustering
 
+from models import Model
 from .db import DB
 
 
