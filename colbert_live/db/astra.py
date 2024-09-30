@@ -3,15 +3,13 @@ import os
 import time
 import urllib.error
 import urllib.request
-from typing import Optional, Any
+from typing import Any
 
 import torch
 from cassandra.auth import PlainTextAuthProvider
 from cassandra.cluster import Cluster, ResultSet
 from cassandra.concurrent import execute_concurrent_with_args
 from cassandra.policies import ExponentialReconnectionPolicy
-
-import json
 
 from .db import DB
 
@@ -103,8 +101,8 @@ class AstraCQL(DB):
     def __init__(self,
                  keyspace: str,
                  embedding_dim: int,
-                 astra_db_id: Optional[str],
-                 astra_token: Optional[str],
+                 astra_db_id: str | None,
+                 astra_token: str | None,
                  verbose: bool = False):
         self.verbose = verbose
         self.embedding_dim = embedding_dim
@@ -182,7 +180,7 @@ class AstraCQL(DB):
         """
         raise NotImplementedError('Subclasses must implement process_ann_rows')
 
-    def process_chunk_rows(self, result: ResultSet) -> List[torch.Tensor]:
+    def process_chunk_rows(self, result: ResultSet) -> list[torch.Tensor]:
         """
         Process the result of the chunk query into a list of embedding tensors.
 
@@ -201,7 +199,7 @@ class AstraCQL(DB):
         """
         raise NotImplementedError('Subclasses must implement process_chunk_rows')
 
-    def query_ann(self, embeddings: torch.Tensor, limit: int) -> list[list[tuple[str, float]]]:
+    def query_ann(self, embeddings: torch.Tensor, limit: int) -> list[list[tuple[Any, float]]]:
         if self.verbose: print(f'Querying ANN with {len(embeddings)} embeddings')
         embedding_list = embeddings.tolist()
         params = [(emb, emb, limit) for emb in embedding_list]
@@ -219,12 +217,7 @@ class AstraCQL(DB):
         if self.verbose: print(f'Loading embeddings from {len(chunk_ids)} chunks for full ColBERT scoring')
         transformed_pks = [pk if isinstance(pk, tuple) else (pk,) for pk in chunk_ids]
         results = execute_concurrent_with_args(self.session, self.query_chunks_stmt, transformed_pks)
-        chunk_embeddings = []
-        for success, result in results:
-            if not success:
-                raise Exception('Failed to retrieve chunk embeddings')
-            chunk_embeddings.append(self.process_chunk_rows(result))
-        return chunk_embeddings
+        return [self.process_chunk_rows(result) for success, result in results if success]
 
     def _connect_local(self):
         reconnection_policy = ExponentialReconnectionPolicy(base_delay=1, max_delay=60)
