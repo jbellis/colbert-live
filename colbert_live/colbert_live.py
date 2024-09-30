@@ -55,7 +55,7 @@ class ColbertLive:
     def __init__(self,
                  db: DB,
                  model: Model,
-                 doc_pool_factor: int = 2,
+                 doc_pool_factor: int = None,
                  query_pool_distance: float = 0.03
                  ):
         """
@@ -65,7 +65,7 @@ class ColbertLive:
             model_name: The name of the ColBERT model to use.
             db: The database instance to use for querying and storing embeddings.
             doc_pool_factor (optional): The factor by which to pool document embeddings, as the number of embeddings per cluster.
-                `None` to disable.
+                `0.0` to disable.  The default is 2 for ColBERT models and 0 for ColPaLi models.
             query_pool_distance (optional): The maximum cosine distance across which to pool query embeddings.
                 `0.0` to disable.
 
@@ -75,7 +75,10 @@ class ColbertLive:
         """
         self.db = db
         self.model = model
-        self.doc_pool_factor = doc_pool_factor
+        if doc_pool_factor is None:
+            self.doc_pool_factor = 2 if isinstance(model, ColbertModel) else 0
+        else:
+            self.doc_pool_factor = doc_pool_factor
         self.query_pool_distance = query_pool_distance
 
     def encode_query(self, q: str) -> torch.Tensor:
