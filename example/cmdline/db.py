@@ -3,11 +3,11 @@ from typing import List, Any
 
 import torch
 
-from colbert_live.db.astra import AstraDB
+from colbert_live.db.astra import AstraCQL
 from cassandra.cluster import ResultSet
 
 
-class CmdlineDB(AstraDB):
+class CmdlineDB(AstraCQL):
     def __init__(self, keyspace: str, model_path: str, astra_db_id: str, astra_token: str):
         super().__init__(keyspace, model_path, astra_db_id, astra_token, verbose=True)
 
