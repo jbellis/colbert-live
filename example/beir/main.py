@@ -55,7 +55,7 @@ def process_document_batch(batch: List[Tuple[str, Dict]], db, colbert_live):
         insert_data.extend((chunk_id, i, e) for i, e in enumerate(embedding_tensor))
 
     # Insert chunks and embeddings
-    chunk_stmt_with_parms = list(zip(cycle([db.insert_page_stmt]), chunk_raw_data))
+    chunk_stmt_with_parms = list(zip(cycle([db.insert_chunk_stmt]), chunk_raw_data))
     embeddings_stmt_with_parms = list(zip(cycle([db.insert_embeddings_stmt]), insert_data))
     return execute_concurrent_async(db.session, chunk_stmt_with_parms + embeddings_stmt_with_parms)
 
