@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "colbert-live"
-version = "0.2.0-dev"
+version = "0.2.0"
 authors = [
     { name = "Jonathan Ellis", email = "jbellis@gmail.com" },
 ]
-description = "ColBERT Live! implements efficient ColBERT search on top of vector indexes that support live updates (without rebuilding the entire index)"
+description = "ColBERT Live! implements efficient ColBERT and ColPaLi search on top of vector indexes that support live updates (without rebuilding the entire index)"
 readme = "README.md"
 requires-python = ">=3.9"
 classifiers = [
