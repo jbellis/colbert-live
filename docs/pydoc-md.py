@@ -9,21 +9,53 @@ def get_class_info(module_name, class_name):
     cls = getattr(module, class_name)
     return cls
 
+def format_docstring(docstring):
+    if not docstring:
+        return "No description available.\n\n"
+    
+    lines = docstring.split('\n')
+    formatted = []
+    in_args = False
+    in_returns = False
+    
+    for line in lines:
+        line = line.strip()
+        if line.startswith('Args:'):
+            formatted.append("\n**Arguments:**\n")
+            in_args = True
+            in_returns = False
+        elif line.startswith('Returns:'):
+            formatted.append("\n**Returns:**\n")
+            in_returns = True
+            in_args = False
+        elif in_args and ':' in line:
+            param, desc = line.split(':', 1)
+            formatted.append(f"- `{param.strip()}`: {desc.strip()}")
+        elif in_returns and not line:
+            in_returns = False
+            formatted.append("\n")
+        else:
+            if in_args or in_returns:
+                formatted.append(f"  {line}")
+            else:
+                formatted.append(line)
+    
+    return '\n'.join(formatted).strip() + '\n\n'
+
 def pydoc_to_markdown(module_name, class_name):
     cls = get_class_info(module_name, class_name)
     
     # Class name and docstring
     md = f"## {class_name}\n\n"
     if cls.__doc__:
-        md += f"{cls.__doc__.strip()}\n\n"
+        md += format_docstring(cls.__doc__)
     
     # Constructor
     if cls.__init__ is not object.__init__:  # Check if __init__ is not the default
         signature = str(inspect.signature(cls.__init__))
         md += f"### Constructor\n\n#### `__init__{signature}`\n\n"
         if cls.__init__.__doc__:
-            docstring = re.sub(r'\n\s*', '\n', cls.__init__.__doc__.strip())
-            md += f"{docstring}\n\n"
+            md += format_docstring(cls.__init__.__doc__)
         else:
             md += "No description available.\n\n"
     
@@ -42,9 +74,7 @@ def pydoc_to_markdown(module_name, class_name):
             
             # Method docstring
             if method.__doc__:
-                # Clean up the docstring
-                docstring = re.sub(r'\n\s*', '\n', method.__doc__.strip())
-                md += f"{docstring}\n\n"
+                md += format_docstring(method.__doc__)
             else:
                 md += "No description available.\n\n"
     
@@ -60,8 +90,7 @@ def pydoc_to_markdown(module_name, class_name):
             md += f"#### `{name}`\n\n"
             
             if prop.__doc__:
-                docstring = re.sub(r'\n\s*', '\n', prop.__doc__.strip())
-                md += f"{docstring}\n\n"
+                md += format_docstring(prop.__doc__)
             else:
                 md += "No description available.\n\n"
     

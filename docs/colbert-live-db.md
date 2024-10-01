@@ -9,21 +9,33 @@ This documents how to implement a DB subclass for use with ColbertLive.  DB is a
 
 Perform an approximate nearest neighbor (ANN) search of the ColBERT embeddings.
 This informs the decision of which documents to fetch for full ColBERT scoring.
-Args:
-embeddings: A tensor of ColBERT embeddings to compare against.
-limit: The maximum number of results to return for each embedding.
-Returns:
-A list of lists, one per embedding, where each inner list contains tuples of (PK, similarity)
-for the chunks closest to each query embedding.
+
+
+**Arguments:**
+
+- `embeddings`: A tensor of ColBERT embeddings to compare against.
+- `limit`: The maximum number of results to return for each embedding.
+  
+
+**Returns:**
+
+  A list of lists, one per embedding, where each inner list contains tuples of (PK, similarity)
+  for the chunks closest to each query embedding.
 
 #### `query_chunks(self, pks: list[typing.Any]) -> Iterable[list[torch.Tensor]]`
 
 Retrieve all ColBERT embeddings for specific chunks so that ColBERT scores
 can be computed.
-Args:
-pks: A list of primary keys (of any object type) identifying the chunks.
-Returns:
-A list of PyTorch tensors representing the ColBERT embeddings for each of the specified chunks.
+
+
+**Arguments:**
+
+- `pks`: A list of primary keys (of any object type) identifying the chunks.
+  
+
+**Returns:**
+
+  A list of PyTorch tensors representing the ColBERT embeddings for each of the specified chunks.
 
 
 

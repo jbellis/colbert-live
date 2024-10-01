@@ -8,56 +8,82 @@ This documents how to use Colbert Live with the AstraCQL DB implementation.  Fir
 #### `__init__(self, db: colbert_live.db.db.DB, model: colbert_live.models.Model, doc_pool_factor: int = 2, query_pool_distance: float = 0.03)`
 
 Initialize the ColbertLive instance.
-Args:
-model_name: The name of the ColBERT model to use.
-db: The database instance to use for querying and storing embeddings.
-doc_pool_factor (optional): The factor by which to pool document embeddings, as the number of embeddings per cluster.
-`None` to disable.
-query_pool_distance (optional): The maximum cosine distance across which to pool query embeddings.
-`0.0` to disable.
-doc_pool_factor is only used by encode_chunks.
-query_pool_distance and tokens_per_query are only used by search and encode_query.
+
+
+**Arguments:**
+
+- `model_name`: The name of the ColBERT model to use.
+- `db`: The database instance to use for querying and storing embeddings.
+- `doc_pool_factor (optional)`: The factor by which to pool document embeddings, as the number of embeddings per cluster.
+  `None` to disable.
+- `query_pool_distance (optional)`: The maximum cosine distance across which to pool query embeddings.
+  `0.0` to disable.
+  
+  doc_pool_factor is only used by encode_chunks.
+  
+  query_pool_distance and tokens_per_query are only used by search and encode_query.
 
 ### Methods
 
 #### `encode_chunks(self, chunks: List[str]) -> List[torch.Tensor]`
 
 Encode a batch of document chunks into tensors of embeddings.
-Args:
-chunks: A list of content strings to encode.
-Performance note: while it is perfectly legitimate to encode a single chunk at a time, this method
-is designed to support multiple chunks because that means we can dispatch all of that work to the GPU
-at once.  The overhead of invoking a CUDA kernel is *very* significant, so for an initial bulk load
-it is much faster to encode in larger batches.  (Corollary: if you are encoding without the benefit of
-GPU acceleration, then this should not matter very much.)
-Returns:
-A list of 2D tensors of embeddings, one for each input chunk.
-Each tensor has shape (num_embeddings, embedding_dim), where num_embeddings is variable (one per token).
+
+
+**Arguments:**
+
+- `chunks`: A list of content strings to encode.
+  
+- `Performance note`: while it is perfectly legitimate to encode a single chunk at a time, this method
+  is designed to support multiple chunks because that means we can dispatch all of that work to the GPU
+  at once.  The overhead of invoking a CUDA kernel is *very* significant, so for an initial bulk load
+  it is much faster to encode in larger batches.  (OTOH, if you are encoding without the benefit of
+  GPU acceleration, then this should not matter very much.)
+  
+
+**Returns:**
+
+  A list of 2D tensors of embeddings, one for each input chunk.
+  Each tensor has shape (num_embeddings, embedding_dim), where num_embeddings is variable (one per token).
 
 #### `encode_query(self, q: str) -> torch.Tensor`
 
 Encode a query string into a tensor of embeddings.
-Args:
-q: The query string to encode.
-Returns:
-A tensor of query embeddings.
+
+
+**Arguments:**
+
+- `q`: The query string to encode.
+  
+
+**Returns:**
+
+  A tensor of query embeddings.
 
 #### `search(self, query: str, k: int = 10, n_ann_docs: Optional[int] = None, n_maxsim_candidates: Optional[int] = None) -> List[Tuple[Any, float]]`
 
 Perform a ColBERT search and return the top chunk IDs with their scores.
-Args:
-query: The query string to search for.
-k: The number of top chunks to return.
-n_ann_docs: The number of chunks to retrieve for each embedding in the initial ANN search.
-n_maxsim_candidates: The number of top candidates to consider for full ColBERT scoring
-after combine the results of the ANN searches.
-If n_ann_docs and/or n_colbert_candidates are not specified, a best guess will be derived
-from top_k.
-Performance note: search is `O(log n_ann_docs) + O(n_colbert_candidates)`.  (And O(tokens_per_query),
-if your queries are sufficiently long).  Thus, you can generally afford to overestimate `n_ann_docs`,
-but you will want to keep `n_colbert_candidates` as low as possible.
-Returns:
-List[(Any, float)]: A list of tuples of (chunk_id, ColBERT score) for the top k chunks.
+
+
+**Arguments:**
+
+- `query`: The query string to search for.
+- `k`: The number of top chunks to return.
+- `n_ann_docs`: The number of chunks to retrieve for each embedding in the initial ANN search.
+- `n_maxsim_candidates`: The number of top candidates to consider for full ColBERT scoring
+  after combine the results of the ANN searches.
+  
+  If n_ann_docs and/or n_colbert_candidates are not specified, a best guess will be derived
+  from top_k.
+  
+- `Performance note`: search is `O(log n_ann_docs) + O(n_colbert_candidates)`.  (And O(tokens_per_query),
+  if your queries are sufficiently long).  Thus, you can generally afford to overestimate `n_ann_docs`,
+  but you will want to keep `n_colbert_candidates` as low as possible.
+  
+
+**Returns:**
+
+  List[(Any, float)]: A list of tuples of (chunk_id, ColBERT score) for the top k chunks.
 
 
 
@@ -186,47 +212,49 @@ Next, you will need to subclass AstraCQL:
 
 AstraCQL implements the ColBERT Live DB interface for Astra CQL databases as well as local Cassandra.
 
-    This class provides a foundation for creating application-specific implementations.
-    Subclasses should override the prepare, process_ann_rows, and process_chunk_rows methods
-    to customize the behavior for their specific use case.
+This class provides a foundation for creating application-specific implementations.
+Subclasses should override the prepare, process_ann_rows, and process_chunk_rows methods
+to customize the behavior for their specific use case.
 
-    Args:
-        keyspace (str): The keyspace to use in the database. AstraCQL will create it if it doesn't exist.
-        embedding_dim (int): The dimension of the ColBERT embeddings.
-        astra_db_id (Optional[str]): The Astra database ID (required for Astra connections).
-        astra_token (Optional[str]): The Astra authentication token (required for Astra connections).
-        verbose (bool): If True, print verbose output.
 
-    Attributes:
-        session: The database session object.
-        query_ann_stmt: The prepared statement for ANN queries.
-        query_chunks_stmt: The prepared statement for chunk queries.
+**Arguments:**
 
-    Subclasses must implement:
-    - prepare: Set up necessary database statements and perform any required table manipulation.
-    - process_ann_rows: Process the results of the ANN query.
-    - process_chunk_rows: Process the results of the chunk query.
-    See the docstrings of these methods for details.
-
-    Example usage in a subclass:
-        class MyDB(AstraCQL):
-            def prepare(self, embedding_dim):
-                # Create tables and indexes
-                self.session.execute(f"CREATE TABLE IF NOT EXISTS ...")
-                self.session.execute(f"CREATE CUSTOM INDEX IF NOT EXISTS ...")
-
-                # Prepare statements
-                self.query_ann_stmt = self.session.prepare(f"SELECT ... ORDER BY ... ANN OF ...")
-                self.query_chunks_stmt = self.session.prepare(f"SELECT ... WHERE ...")
-
-            def process_ann_rows(self, result):
-                return [(row.primary_key, row.similarity) for row in result]
-
-            def process_chunk_rows(self, result):
-                return [torch.tensor(row.embedding) for row in result]
-
-    Raises:
-        Exception: If Astra credentials are incomplete or connection fails.
+- `keyspace (str)`: The keyspace to use in the database. AstraCQL will create it if it doesn't exist.
+- `embedding_dim (int)`: The dimension of the ColBERT embeddings.
+- `astra_db_id (Optional[str])`: The Astra database ID (required for Astra connections).
+- `astra_token (Optional[str])`: The Astra authentication token (required for Astra connections).
+- `verbose (bool)`: If True, print verbose output.
+  
+- `Attributes`: 
+- `session`: The database session object.
+- `query_ann_stmt`: The prepared statement for ANN queries.
+- `query_chunks_stmt`: The prepared statement for chunk queries.
+  
+- `Subclasses must implement`: 
+- `- prepare`: Set up necessary database statements and perform any required table manipulation.
+- `- process_ann_rows`: Process the results of the ANN query.
+- `- process_chunk_rows`: Process the results of the chunk query.
+  See the docstrings of these methods for details.
+  
+- `Example usage in a subclass`: 
+- `class MyDB(AstraCQL)`: 
+- `def prepare(self, embedding_dim)`: 
+  # Create tables and indexes
+  self.session.execute(f"CREATE TABLE IF NOT EXISTS ...")
+  self.session.execute(f"CREATE CUSTOM INDEX IF NOT EXISTS ...")
+  
+  # Prepare statements
+  self.query_ann_stmt = self.session.prepare(f"SELECT ... ORDER BY ... ANN OF ...")
+  self.query_chunks_stmt = self.session.prepare(f"SELECT ... WHERE ...")
+  
+- `def process_ann_rows(self, result)`: 
+  return [(row.primary_key, row.similarity) for row in result]
+  
+- `def process_chunk_rows(self, result)`: 
+  return [torch.tensor(row.embedding) for row in result]
+  
+- `Raises`: 
+- `Exception`: If Astra credentials are incomplete or connection fails.
 
 ### Constructor
 
@@ -240,42 +268,58 @@ No description available.
 
 Prepare the database schema and query statements.  AstraCQL creates the keyspace if necessary;
 everything else is up to you.
+
 This method should be implemented by subclasses to set up the necessary
 database structure and prepare statements for querying.
-Args:
-embedding_dim (int): The dimension of the ColBERT embeddings.
-Expected implementations:
-1. Create required tables (if not exists)
-2. Create necessary indexes (if not exists)
-3. Prepare two main statements:
-a) query_ann_stmt: For approximate nearest neighbor search
-- Parameters: [query_embedding, query_embedding, limit]
-- Expected result: [(primary_key, similarity)]
-Example:
-SELECT pk, similarity_cosine(embedding, ?) AS similarity
-FROM table
-ORDER BY embedding ANN OF ?
-LIMIT ?
-b) query_chunks_stmt: For retrieving embeddings by primary key
-- Parameters: [primary_key]
-- Expected result: [embedding]
-Example:
-SELECT embedding
-FROM table
-WHERE pk = ?
-Note:
-- Ensure that compound primary keys are represented as tuples in the results.
-- The results of these queries will be processed by process_ann_rows and process_chunk_rows, respectively.
+
+
+**Arguments:**
+
+- `embedding_dim (int)`: The dimension of the ColBERT embeddings.
+  
+- `Expected implementations`: 
+  1. Create required tables (if not exists)
+  2. Create necessary indexes (if not exists)
+- `3. Prepare two main statements`: 
+- `a) query_ann_stmt`: For approximate nearest neighbor search
+- `- Parameters`: [query_embedding, query_embedding, limit]
+- `- Expected result`: [(primary_key, similarity)]
+- `Example`: 
+  SELECT pk, similarity_cosine(embedding, ?) AS similarity
+  FROM table
+  ORDER BY embedding ANN OF ?
+  LIMIT ?
+  
+- `b) query_chunks_stmt`: For retrieving embeddings by primary key
+- `- Parameters`: [primary_key]
+- `- Expected result`: [embedding]
+- `Example`: 
+  SELECT embedding
+  FROM table
+  WHERE pk = ?
+  
+- `Note`: 
+  - Ensure that compound primary keys are represented as tuples in the results.
+  - The results of these queries will be processed by process_ann_rows and process_chunk_rows, respectively.
 
 #### `process_ann_rows(self, result: cassandra.cluster.ResultSet) -> list[tuple[typing.Any, float]]`
 
 Process the result of the ANN query into a list of (primary_key, similarity) tuples.
-Args:
-result (ResultSet): The result set from the ANN query.
-Returns:
-List[Tuple[Any, float]]: A list of tuples, each containing a primary key and its similarity score.
+
+
+**Arguments:**
+
+- `result (ResultSet)`: The result set from the ANN query.
+  
+
+**Returns:**
+
+  List[Tuple[Any, float]]: A list of tuples, each containing a primary key and its similarity score.
+
+
 Example implementation:
 return [(row.primary_key, row.similarity) for row in result]
+
 Note:
 - The primary_key should match the structure used in your database schema.
 - For compound primary keys, return them as tuples, e.g., (doc_id, page_num).
@@ -283,12 +327,21 @@ Note:
 #### `process_chunk_rows(self, result: cassandra.cluster.ResultSet) -> list[torch.Tensor]`
 
 Process the result of the chunk query into a list of embedding tensors.
-Args:
-result (ResultSet): The result set from the chunk query.
-Returns:
-List[torch.Tensor]: A list of embedding tensors.
+
+
+**Arguments:**
+
+- `result (ResultSet)`: The result set from the chunk query.
+  
+
+**Returns:**
+
+  List[torch.Tensor]: A list of embedding tensors.
+
+
 Example implementation:
 return [torch.tensor(row.embedding) for row in result]
+
 Note:
 - Ensure that the returned tensors match the expected embedding dimension.
 - If your database stores embeddings in a different format, convert them to torch.Tensor here.

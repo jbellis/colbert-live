@@ -104,7 +104,7 @@ class ColbertLive:
         Performance note: while it is perfectly legitimate to encode a single chunk at a time, this method
         is designed to support multiple chunks because that means we can dispatch all of that work to the GPU
         at once.  The overhead of invoking a CUDA kernel is *very* significant, so for an initial bulk load
-        it is much faster to encode in larger batches.  (Corollary: if you are encoding without the benefit of
+        it is much faster to encode in larger batches.  (OTOH, if you are encoding without the benefit of
         GPU acceleration, then this should not matter very much.)
 
         Returns:
