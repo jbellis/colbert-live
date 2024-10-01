@@ -171,16 +171,18 @@ class ColbertLive:
         Returns:
             List[(Any, float)]: A list of tuples of (chunk_id, ColBERT score) for the top k chunks.
         """
+        Q = self.encode_query(query)
+        return self._search(Q, k, n_ann_docs, n_maxsim_candidates)
+
+    # exposed for vidore-benchmark, which wants to batch-compute query embeddings up front
+    def _search(self, Q, k, n_ann_docs, n_maxsim_candidates):
+        query_encodings = Q[0]
         if n_ann_docs is None:
             # f(1) = 105, f(10) = 171, f(100) = 514, f(500) = 998
             n_ann_docs = _expand(k, 94.9, 11.0, -1.48)
         if n_maxsim_candidates is None:
             # f(1) = 9, f(10) = 20, f(100) = 119, f(900) = 1000
             n_maxsim_candidates = _expand(k, 8.82, 1.13, -0.00471)
-
-        Q = self.encode_query(query)
-        query_encodings = Q[0]
-
         # compute the max score for each term for each doc
         chunks_per_query = {}
         for n, rows in enumerate(self.db.query_ann(query_encodings, n_ann_docs)):
@@ -189,20 +191,16 @@ class ColbertLive:
                 chunks_per_query[key] = max(chunks_per_query.get(key, -1), similarity)
         if not chunks_per_query:
             return []  # empty database
-
         # sum the partial scores and identify the top candidates
         chunks = {}
         for (chunk_id, qv), similarity in chunks_per_query.items():
             chunks[chunk_id] = chunks.get(chunk_id, 0) + similarity
         candidates = sorted(chunks, key=chunks.get, reverse=True)[:n_maxsim_candidates]
-
         # Load document encodings
         D_packed, D_lengths = self._load_data_and_construct_tensors(candidates)
         # Calculate full ColBERT scores
         scores = self.model.score(Q, D_packed, D_lengths)
-
         # Map the scores back to chunk IDs and sort
         results = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
-
         # Convert tensor scores to Python floats and return top k results
         return [(chunk_id, score.item()) for chunk_id, score in results[:k]]
