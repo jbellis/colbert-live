@@ -109,7 +109,7 @@ def main():
     args = parser.parse_args()
 
     model = Model.from_name_or_path('vidore/colpali-v1.2')
-    astra_db_id, astra_token = get_astra_params()
+    astra_db_id, astra_token = None, None # get_astra_params()
     db = CmdlineDB('colpali', model.dim, astra_db_id, astra_token)
     colbert_live = ColbertLive(db, model)
 
