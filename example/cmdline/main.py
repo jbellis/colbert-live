@@ -88,11 +88,11 @@ def get_astra_params():
     if not astra_db_id:
         print("Error: ASTRA_DB_ID environment variable must be set")
         exit(1)
-    astra_db_region = os.getenv("ASTRA_DB_REGION")
-    if not astra_db_region:
-        print("Error: ASTRA_DB_REGION environment variable must be set")
+    astra_token = os.getenv("ASTRA_DB_TOKEN")
+    if not astra_token:
+        print("Error: ASTRA_DB_TOKEN environment variable must be set")
         exit(1)
-    return astra_db_id, astra_db_region
+    return astra_db_id, astra_token
 
 
 def main():
@@ -109,8 +109,8 @@ def main():
     args = parser.parse_args()
 
     model = Model.from_name_or_path('vidore/colpali-v1.2')
-    astra_db_id, astra_db_region = get_astra_params()
-    db = CmdlineDB('colpali', model.dim)
+    astra_db_id, astra_token = get_astra_params()
+    db = CmdlineDB('colpali', model.dim, astra_db_id, astra_token)
     colbert_live = ColbertLive(db, model)
 
     if args.command == "add":
