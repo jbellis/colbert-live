@@ -181,6 +181,7 @@ if __name__ == "__main__":
 ```
 
 Next, you will need to subclass AstraCQL:
+```
 ## AstraCQL
 
 AstraCQL implements the ColBERT Live DB interface for Astra CQL databases as well as local Cassandra.
@@ -302,8 +303,10 @@ No description available.
 
 
 
+```
 
 ## AstraCQL example
+```
 import uuid
 from typing import List, Any
 
@@ -403,3 +406,4 @@ class CmdlineDB(AstraCQL):
         result = self.session.execute(query, (record_id, page_num))
         return result.one()[0]
 
+```

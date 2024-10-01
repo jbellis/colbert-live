@@ -45,6 +45,10 @@ pip install colbert-live
 - Initialize ColbertLive(db)
 - Call ColbertLive.search(query_str, top_k)
 
+Two cheat sheets for your coding LLM are available:
+- [Using ColBERT Live! with Astra](https://raw.githubusercontent.com/jbellis/colbert-live/refs/heads/master/docs/colbert-live-astra.md)
+- [Implementing a new DB subclass]
+
 Here's the code from the `cmdline` example, which implements adding and searching multi-chunk documents from the commandline.
 
 ```python

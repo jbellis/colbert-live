@@ -1,0 +1,21 @@
+# Colbert Live!
+
+This documents how to implement a DB subclass for use with ColbertLive.  DB is an abstract class that looks like this:
+{sources/DB.md}
+
+As an example, here is the source for AstraCQL, which implements DB for use with Astra, a hosted Cassandra database
+that uses CQL.
+```
+{../colbert_live/db/astra.py}
+```
+
+Note how AstraCQL gives extension points for subclasses to adapt ColbertLive for their schema, but AstraCQL itself
+handles best practices like dispatching queries concurrently.
+
+Here is an example of how AstraCQL is used.  This is given purely to inform your writing of a new DB subclass,
+not to incorporate into the subclass directly.  In particular, this example adds other convenience methods typical
+of a DAL that are not part of the AstraCQL API.
+
+```
+{../example/cmdline/db.py}
+```
