@@ -64,17 +64,15 @@ def search_documents(db, colbert_live, query, k=5):
     results = colbert_live.search(query, k=k)
     print("\nSearch results:")
     print("Score  Chunk  Title")
-    for i, (chunk_pk, score) in enumerate(results, 1):
+    for i, (chunk_pk, score) in enumerate(results[:3], 1):
         print(f"{i}. {score:.3f}  {chunk_pk}")
-
-    # TODO
-    # if results:
-    #     print("\nDisplaying top 3 search results in separate window")
-    #     for page in db.get_page_content([chunk_id for chunk_id, _ in results[:3]]):
-    #         image = Image.open(io.BytesIO(page['body']))
-    #         image.show()
-    # else:
-    #     print("\nNo results found.")
+        page_bodies = db.get_page_body(chunk_pk)
+        for page_body in page_bodies:
+            image = Image.open(io.BytesIO(page_body))
+            term_image = AutoImage(image)
+            print(term_image)
+    if not results:
+        print("No results found")
 
 
 def get_astra_params():
