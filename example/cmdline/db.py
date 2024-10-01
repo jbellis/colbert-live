@@ -2,6 +2,7 @@ import uuid
 from typing import List, Any
 
 import torch
+from cassandra.concurrent import execute_concurrent_with_args
 
 from colbert_live.db.astra import AstraCQL
 from cassandra.cluster import ResultSet
@@ -15,32 +16,27 @@ class CmdlineDB(AstraCQL):
         # Create tables asynchronously
         futures = []
 
-        # Create documents table
-        futures.append(self.session.execute_async(f"""
-            CREATE TABLE IF NOT EXISTS {self.keyspace}.documents (
-                id uuid PRIMARY KEY,
-                title text
-            )
-        """))
+        # for simplicity we don't actually have a records table, but if we
+        # wanted to add things like title, creation date, etc., that's where it would go
 
         # Create chunks table
         futures.append(self.session.execute_async(f"""
-            CREATE TABLE IF NOT EXISTS {self.keyspace}.chunks (
-                doc_id uuid,
-                id int,
-                body text,
-                PRIMARY KEY (doc_id, id)
+            CREATE TABLE IF NOT EXISTS {self.keyspace}.pages (
+                record_id uuid,
+                num int,
+                body blob,
+                PRIMARY KEY (record_id, num)
             )
         """))
 
-        # Create chunk_embeddings table
+        # Create page_embeddings table
         futures.append(self.session.execute_async(f"""
-            CREATE TABLE IF NOT EXISTS {self.keyspace}.chunk_embeddings (
-                doc_id uuid,
-                chunk_id int,
+            CREATE TABLE IF NOT EXISTS {self.keyspace}.page_embeddings (
+                record_id uuid,
+                page_num int,
                 embedding_id int,
                 embedding vector<float, {embedding_dim}>,
-                PRIMARY KEY (doc_id, chunk_id, embedding_id)
+                PRIMARY KEY (record_id, page_num, embedding_id)
             )
         """))
 
@@ -51,51 +47,41 @@ class CmdlineDB(AstraCQL):
         # Create colbert_ann index
         index_future = self.session.execute_async(f"""
             CREATE CUSTOM INDEX IF NOT EXISTS colbert_ann 
-            ON {self.keyspace}.chunk_embeddings(embedding) 
+            ON {self.keyspace}.page_embeddings(embedding) 
             USING 'StorageAttachedIndex'
             WITH OPTIONS = {{ 'source_model': 'bert' }}
         """)
 
         # Prepare statements
-        self.insert_document_stmt = self.session.prepare(f"""
-            INSERT INTO {self.keyspace}.documents (id, title) VALUES (?, ?)
-        """)
-        self.insert_chunk_stmt = self.session.prepare(f"""
-            INSERT INTO {self.keyspace}.chunks (doc_id, id, body) VALUES (?, ?, ?)
+        self.insert_page_stmt = self.session.prepare(f"""
+            INSERT INTO {self.keyspace}.pages (record_id, num, body) VALUES (?, ?, ?)
         """)
         self.insert_embedding_stmt = self.session.prepare(f"""
-            INSERT INTO {self.keyspace}.chunk_embeddings (doc_id, chunk_id, embedding_id, embedding) VALUES (?, ?, ?, ?)
+            INSERT INTO {self.keyspace}.page_embeddings (record_id, page_num, embedding_id, embedding) VALUES (?, ?, ?, ?)
         """)
         self.query_ann_stmt = self.session.prepare(f"""
-            SELECT doc_id, chunk_id, similarity_cosine(embedding, ?) AS similarity
-            FROM {self.keyspace}.chunk_embeddings
+            SELECT record_id, page_num, similarity_cosine(embedding, ?) AS similarity
+            FROM {self.keyspace}.page_embeddings
             ORDER BY embedding ANN OF ?
             LIMIT ?
         """)
         self.query_chunks_stmt = self.session.prepare(f"""
-            SELECT embedding FROM {self.keyspace}.chunk_embeddings WHERE doc_id = ? AND chunk_id = ?
+            SELECT embedding FROM {self.keyspace}.page_embeddings WHERE record_id = ? AND page_num = ?
         """)
 
         index_future.result()
         print("Schema ready")
 
-    def add_record(self, title: str, chunks: List[str]):
-        doc_id = uuid.uuid4()
-        self.session.execute(self.insert_document_stmt, (doc_id, title))
+    def add_record(self, pages: list[bytes], embeddings: list[torch.Tensor]):
+        record_id = uuid.uuid4()
+        L = [(record_id, num, body, embeddings)
+             for num, (body, embeddings) in enumerate(zip(pages, embeddings), start=1)]
+        execute_concurrent_with_args(self.session, self.insert_embedding_stmt, L)
 
-        for i, chunk in enumerate(chunks):
-            self.session.execute(self.insert_chunk_stmt, (doc_id, i, chunk))
-
-        return doc_id
-
-    def add_embeddings(self, doc_id: uuid.UUID, chunk_embeddings: List[torch.Tensor]):
-        for chunk_id, embeddings in enumerate(chunk_embeddings):
-            for embedding_id, embedding in enumerate(embeddings):
-                self.session.execute(self.insert_embedding_stmt,
-                                     (doc_id, chunk_id, embedding_id, embedding.tolist()))
+        return record_id
 
     def process_ann_rows(self, result: ResultSet) -> List[tuple[Any, float]]:
-        return [((row.doc_id, row.chunk_id), row.similarity) for row in result]
+        return [((row.record_id, row.page_num), row.similarity) for row in result]
 
     def process_chunk_rows(self, result: ResultSet) -> List[torch.Tensor]:
         return [torch.tensor(row.embedding) for row in result]
