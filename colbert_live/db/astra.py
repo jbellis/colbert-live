@@ -118,7 +118,7 @@ class AstraCQL(DB):
             self._connect_astra(astra_token, astra_db_id)
         self.session.default_timeout = 60  # this is the client timeout, server still has internal timeouts
 
-        self.maybe_create_keyspace(astra_db_id, astra_token)
+        self._maybe_create_keyspace(astra_db_id, astra_token)
         self.prepare(embedding_dim)
 
     def prepare(self, embedding_dim: int):
@@ -239,7 +239,7 @@ class AstraCQL(DB):
         self.session = self.cluster.connect()
         if self.verbose: print(f"Connected to Astra db {db_id}")
 
-    def maybe_create_keyspace(self, db_id, token):
+    def _maybe_create_keyspace(self, db_id, token):
         if token:
             # Use Astra REST API to create keyspace
             url = f"https://api.astra.datastax.com/v2/databases/{db_id}/keyspaces/{self.keyspace}"
