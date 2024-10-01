@@ -45,52 +45,55 @@ pip install colbert-live
 - Initialize ColbertLive(db)
 - Call ColbertLive.search(query_str, top_k)
 
-Here's the code from the `cmdline` example, which implements adding and searching multi-chunk documents from the commandline. 
+Here's the code from the `cmdline` example, which implements adding and searching multi-chunk documents from the commandline.
 
 ```python
 class CmdlineDB(AstraDB):
-    # AstraDB wants subclasses to declare two prepared statements and two methods to process the results
-    # for its implementations of the `query_ann` and `query_chunks` methods of the base class. This lets
-    # AstraDB accommodate arbitrarily different database schemas.
-    def prepare(self, embedding_dim: int):
-        self.query_ann_stmt = ...
-        self.query_chunks_stmt = ...
-    def process_ann_rows(self, result: ResultSet) -> list[tuple[Any, float]]:
-        ...
-    def process_chunk_rows(self, result: ResultSet) -> list[torch.Tensor]:
-        ...
+  # AstraDB wants subclasses to declare two prepared statements and two methods to process the results
+  # for its implementations of the `query_ann` and `query_chunks` methods of the base class. This lets
+  # AstraDB accommodate arbitrarily different database schemas.
+  def prepare(self, embedding_dim: int):
+    self.query_ann_stmt = ...
+    self.query_chunks_stmt = ...
+
+  def process_ann_rows(self, result: ResultSet) -> list[tuple[Any, float]]:
+    ...
+
+  def process_chunk_rows(self, result: ResultSet) -> list[torch.Tensor]:
+    ...
+
 
 def add_document(db, colbert_live, title, chunks):
-    doc_id = db.add_document(title, chunks)
-    chunk_embeddings = colbert_live.encode_chunks(chunks)
-    db.add_embeddings(doc_id, chunk_embeddings)
-    print(f"Document added with ID: {doc_id}")
+  doc_id = db.add_record(title, chunks)
+  chunk_embeddings = colbert_live.encode_chunks(chunks)
+  db.add_embeddings(doc_id, chunk_embeddings)
+  print(f"Document added with ID: {doc_id}")
 
 
 def search_documents(db, colbert_live, query, k=5):
-    results = colbert_live.search(query, k=k)
-    print("\nSearch results:")
-    for i, (chunk_pk, score) in enumerate(results, 1):
-        doc_id, chunk_id = chunk_pk
-        print(doc_id, type(doc_id))
-        rows = db.session.execute(f"SELECT title FROM {db.keyspace}.documents WHERE id = %s", [doc_id])
-        title = rows.one().title
-        print(f"{i}. {title} (Score: {score:.4f})")
+  results = colbert_live.search(query, k=k)
+  print("\nSearch results:")
+  for i, (chunk_pk, score) in enumerate(results, 1):
+    doc_id, chunk_id = chunk_pk
+    print(doc_id, type(doc_id))
+    rows = db.session.execute(f"SELECT title FROM {db.keyspace}.documents WHERE id = %s", [doc_id])
+    title = rows.one().title
+    print(f"{i}. {title} (Score: {score:.4f})")
 
 
 def main():
-    args = ... # arg parsing skipped, see cmdline/main.py for details
+  args = ...  # arg parsing skipped, see cmdline/main.py for details
 
-    db = CmdlineDB('colbertlive',
-                   'answerdotai/answerai-colbert-small-v1',
-                   os.environ.get('ASTRA_DB_ID'),
-                   os.environ.get('ASTRA_DB_TOKEN'))
-    colbert_live = ColbertLive(db)
+  db = CmdlineDB('colbertlive',
+                 'answerdotai/answerai-colbert-small-v1',
+                 os.environ.get('ASTRA_DB_ID'),
+                 os.environ.get('ASTRA_DB_TOKEN'))
+  colbert_live = ColbertLive(db)
 
-    if args.command == "add":
-        add_document(db, colbert_live, args.title, args.chunks)
-    elif args.command == "search":
-        search_documents(db, colbert_live, args.query, args.k)
+  if args.command == "add":
+    add_document(db, colbert_live, args.title, args.chunks)
+  elif args.command == "search":
+    search_documents(db, colbert_live, args.query, args.k)
 ```
 
 ## Supported databases

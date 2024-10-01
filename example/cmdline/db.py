@@ -79,7 +79,7 @@ class CmdlineDB(AstraCQL):
         index_future.result()
         print("Schema ready")
 
-    def add_document(self, title: str, chunks: List[str]):
+    def add_record(self, title: str, chunks: List[str]):
         doc_id = uuid.uuid4()
         self.session.execute(self.insert_document_stmt, (doc_id, title))
 
