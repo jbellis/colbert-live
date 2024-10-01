@@ -11,7 +11,7 @@ from beir.datasets.data_loader import GenericDataLoader
 from beir.retrieval.evaluation import EvaluateRetrieval
 
 from colbert_live.models import Model
-from example.util import execute_concurrent_async
+from colbert_live.db.astra import execute_concurrent_async
 from tqdm import tqdm
 
 from colbert_live import ColbertLive
