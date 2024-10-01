@@ -1,15 +1,13 @@
 import math
-from typing import List, Dict, Any, Optional
+from typing import List, Any, Optional
 from typing import Tuple
 
 import numpy as np
 import torch
-from colbert.indexing.collection_encoder import CollectionEncoder
-from colbert.infra.config import ColBERTConfig
-from colbert.modeling.checkpoint import Checkpoint, pool_embeddings_hierarchical
-from colbert.modeling.colbert import colbert_score_packed
+from colbert.modeling.checkpoint import pool_embeddings_hierarchical
 from sklearn.cluster import AgglomerativeClustering
 
+from .models import Model
 from .db import DB
 
 
@@ -21,7 +19,7 @@ def _expand(x, a, b, c):
         return 0
     return max(x, int(a + b*x + c*x*math.log(x)))
 
-def _pool_query_embeddings(query_embeddings: torch.Tensor, max_distance: float, use_gpu: bool) -> torch.Tensor:
+def _pool_query_embeddings(query_embeddings: torch.Tensor, max_distance: float) -> torch.Tensor:
     # Convert embeddings to numpy for clustering
     embeddings_np = query_embeddings.cpu().numpy()
     # Cluster
