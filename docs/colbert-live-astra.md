@@ -12,8 +12,8 @@ Initialize the ColbertLive instance.
 
 **Arguments:**
 
-- `model_name`: The name of the ColBERT model to use.
 - `db`: The database instance to use for querying and storing embeddings.
+- `Model`: The ColBERT or ColPaLi model class to use.
 - `doc_pool_factor (optional)`: The factor by which to pool document embeddings, as the number of embeddings per cluster.
   `None` to disable.
 - `query_pool_distance (optional)`: The maximum cosine distance across which to pool query embeddings.
@@ -25,14 +25,15 @@ Initialize the ColbertLive instance.
 
 ### Methods
 
-#### `encode_chunks(self, chunks: List[str]) -> List[torch.Tensor]`
+#### `encode_chunks(self, chunks: list[str | PIL.Image.Image]) -> list[torch.Tensor]`
 
 Encode a batch of document chunks into tensors of embeddings.
 
 
 **Arguments:**
 
-- `chunks`: A list of content strings to encode.
+- `chunks`: A list of content strings or images to encode.  (The type of data must match what
+  your Model can process.)
   
 - `Performance note`: while it is perfectly legitimate to encode a single chunk at a time, this method
   is designed to support multiple chunks because that means we can dispatch all of that work to the GPU
@@ -43,12 +44,13 @@ Encode a batch of document chunks into tensors of embeddings.
 
 **Returns:**
 
-  A list of 2D tensors of embeddings, one for each input chunk.
+  A list of 2D tensors of float32 embeddings, one for each input chunk.
   Each tensor has shape (num_embeddings, embedding_dim), where num_embeddings is variable (one per token).
 
 #### `encode_query(self, q: str) -> torch.Tensor`
 
-Encode a query string into a tensor of embeddings.
+Encode a query string into a tensor of embeddings.  Called automatically by search,
+but also exposed here as a public method.
 
 
 **Arguments:**
@@ -58,9 +60,9 @@ Encode a query string into a tensor of embeddings.
 
 **Returns:**
 
-  A tensor of query embeddings.
+  A 2D tensor of query embeddings.
 
-#### `search(self, query: str, k: int = 10, n_ann_docs: Optional[int] = None, n_maxsim_candidates: Optional[int] = None) -> List[Tuple[Any, float]]`
+#### `search(self, query: str, k: int = 10, n_ann_docs: Optional[int] = None, n_maxsim_candidates: Optional[int] = None) -> list[tuple[typing.Any, float]]`
 
 Perform a ColBERT search and return the top chunk IDs with their scores.
 
@@ -83,7 +85,7 @@ Perform a ColBERT search and return the top chunk IDs with their scores.
 
 **Returns:**
 
-  List[(Any, float)]: A list of tuples of (chunk_id, ColBERT score) for the top k chunks.
+  list[tuple[Any, float]]: A list of tuples of (chunk_id, ColBERT score) for the top k chunks.
 
 
 
