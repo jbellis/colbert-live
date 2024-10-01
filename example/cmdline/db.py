@@ -59,6 +59,8 @@ class CmdlineDB(AstraCQL):
         self.insert_embedding_stmt = self.session.prepare(f"""
             INSERT INTO {self.keyspace}.page_embeddings (record_id, page_num, embedding_id, embedding) VALUES (?, ?, ?, ?)
         """)
+
+        index_future.result()
         self.query_ann_stmt = self.session.prepare(f"""
             SELECT record_id, page_num, similarity_cosine(embedding, ?) AS similarity
             FROM {self.keyspace}.page_embeddings
@@ -69,13 +71,16 @@ class CmdlineDB(AstraCQL):
             SELECT embedding FROM {self.keyspace}.page_embeddings WHERE record_id = ? AND page_num = ?
         """)
 
-        index_future.result()
         print("Schema ready")
 
     def add_record(self, pages: list[bytes], embeddings: list[torch.Tensor]):
         record_id = uuid.uuid4()
-        L = [(record_id, num, body, embeddings)
-             for num, (body, embeddings) in enumerate(zip(pages, embeddings), start=1)]
+        L = [(record_id, num, body) for num, body in enumerate(pages, start=1)]
+        execute_concurrent_with_args(self.session, self.insert_page_stmt, L)
+
+        L = [(record_id, page_num, embedding_id, embedding)
+             for page_num in range(1, len(embeddings) + 1)
+             for embedding_id, embedding in enumerate(embeddings[page_num - 1])]
         execute_concurrent_with_args(self.session, self.insert_embedding_stmt, L)
 
         return record_id
