@@ -65,10 +65,7 @@ def search_documents(db, colbert_live, query, k=5):
     print("\nSearch results:")
     print("Score  Chunk  Title")
     for i, (chunk_pk, score) in enumerate(results, 1):
-        doc_id, chunk_id = chunk_pk
-        rows = db.session.execute(f"SELECT title FROM {db.keyspace}.documents WHERE id = %s", [doc_id])
-        title = rows.one().title
-        print(f"{score:.3f}  {chunk_id}      {title}")
+        print(f"{i}. {score:.3f}  {chunk_pk}")
 
     # TODO
     # if results:
