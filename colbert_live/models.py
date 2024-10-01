@@ -90,6 +90,8 @@ class ColbertModel(Model):
         self.config = ColBERTConfig(checkpoint=model_name, query_maxlen=tokens_per_query)
         self.checkpoint = Checkpoint(self.config.checkpoint, colbert_config=self.config)
         self.encoder = CollectionEncoder(self.config, self.checkpoint)
+        # TODO is there a better way to get the output dimension?
+        self._dim = len(self.encode_query("foo")[0])
 
     def encode_query(self, q: str) -> torch.Tensor:
         return self.checkpoint.queryFromText([q])[0]
@@ -116,7 +118,7 @@ class ColbertModel(Model):
 
     @property
     def dim(self):
-        return self.config.dim
+        return self._dim
 
 
 class ColpaliModel(Model):
