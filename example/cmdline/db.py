@@ -91,7 +91,7 @@ class CmdlineDB(AstraCQL):
     def process_chunk_rows(self, result: ResultSet) -> List[torch.Tensor]:
         return [torch.tensor(row.embedding) for row in result]
 
-    def get_page_body(self, chunk_pk: tuple) -> List[bytes]:
+    def get_page_body(self, chunk_pk: tuple) -> bytes:
         record_id, page_num = chunk_pk
         query = f"SELECT body FROM {self.keyspace}.pages WHERE record_id = %s AND num = %s"
         result = self.session.execute(query, (record_id, page_num))

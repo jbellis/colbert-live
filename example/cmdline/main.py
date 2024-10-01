@@ -66,11 +66,9 @@ def search_documents(db, colbert_live, query, k=5):
     print("Score  Chunk  Title")
     for i, (chunk_pk, score) in enumerate(results[:3], 1):
         print(f"{i}. {score:.3f}  {chunk_pk}")
-        page_bodies = db.get_page_body(chunk_pk)
-        for page_body in page_bodies:
-            image = Image.open(io.BytesIO(page_body))
-            term_image = AutoImage(image)
-            print(term_image)
+        page_body = db.get_page_body(chunk_pk)
+        image = Image.open(io.BytesIO(page_body))
+        image.show()
     if not results:
         print("No results found")
 
