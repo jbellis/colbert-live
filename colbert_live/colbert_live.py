@@ -78,13 +78,14 @@ class ColbertLive:
 
     def encode_query(self, q: str) -> torch.Tensor:
         """
-        Encode a query string into a tensor of embeddings.
+        Encode a query string into a tensor of embeddings.  Called automatically by search,
+        but also exposed here as a public method.
 
         Args:
             q: The query string to encode.
 
         Returns:
-            A tensor of query embeddings.
+            A 2D tensor of query embeddings.
         """
         query_embeddings = self.model.encode_query(q)  # Get embeddings for a single query
         query_embeddings = query_embeddings.float()  # Convert to float32
@@ -92,7 +93,7 @@ class ColbertLive:
             result = query_embeddings  # Add batch dimension
         else:
             result = _pool_query_embeddings(query_embeddings, self.query_pool_distance)  # Add batch dimension
-        return result.unsqueeze(0)
+        return result
 
     def encode_chunks(self, chunks: list[str | Image]) -> list[torch.Tensor]:
         """
@@ -174,9 +175,11 @@ class ColbertLive:
         Q = self.encode_query(query)
         return self._search(Q, k, n_ann_docs, n_maxsim_candidates)
 
-    # exposed for vidore-benchmark, which wants to batch-compute query embeddings up front
-    def _search(self, Q, k, n_ann_docs, n_maxsim_candidates):
-        query_encodings = Q[0]
+    def _search(self, query_encodings, k, n_ann_docs, n_maxsim_candidates):
+        """
+        Search with precomputed query embeddings.
+        Exposed for vidore-benchmark, which wants to batch-compute query embeddings up front
+        """
         if n_ann_docs is None:
             # f(1) = 105, f(10) = 171, f(100) = 514, f(500) = 998
             n_ann_docs = _expand(k, 94.9, 11.0, -1.48)
