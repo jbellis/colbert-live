@@ -95,4 +95,4 @@ class CmdlineDB(AstraCQL):
         record_id, page_num = chunk_pk
         query = f"SELECT body FROM {self.keyspace}.pages WHERE record_id = %s AND num = %s"
         result = self.session.execute(query, (record_id, page_num))
-        return result.one()['body']
+        return result.one()[0]
