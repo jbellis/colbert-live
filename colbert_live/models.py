@@ -58,9 +58,11 @@ class Model(ABC):
         """
         pass
 
-    @property
     @abstractmethod
-    def use_gpu(self):
+    def to_device(self, T: torch.Tensor):
+        """
+        Copy a tensor to the device used by this model.  (Used when loading from the database.)
+        """
         pass
 
     @property
@@ -77,6 +79,10 @@ class Model(ABC):
         else:
             raise ValueError(
                 f"Unknown model: {name_or_path}. You can manually instantiate an instance of ColbertModel or ColpaliModel.")
+
+
+def _get_module_device(module):
+    return next(module.parameters()).device
 
 
 class ColbertModel(Model):
@@ -105,9 +111,8 @@ class ColbertModel(Model):
         # colbert_score_packed expects a 3D query tensor even though it only operates on a single query
         return colbert_score_packed(Q.unsqueeze(0), D_packed, D_lengths, config=self.config)
 
-    @property
-    def use_gpu(self):
-        return self.checkpoint.use_gpu
+    def to_device(self, T: torch.Tensor):
+        return T.to(_get_module_device(self.checkpoint))
 
     @property
     def dim(self):
@@ -115,19 +120,17 @@ class ColbertModel(Model):
 
 
 class ColpaliModel(Model):
-    def __init__(self, model_name: str, device: str = "cuda"):
-        self.device = device
+    def __init__(self, model_name: str):
         self.colpali = ColPali.from_pretrained(
             model_name,
             torch_dtype=torch.bfloat16,
-            device_map="cuda" if device == "cuda" else None,
+            device_map="auto",
         ).eval()
         self.processor = ColPaliProcessor.from_pretrained(model_name)
 
     def encode_query(self, q: str) -> torch.Tensor:
         with torch.no_grad():
             batch = self.processor.process_queries([q])
-            batch = {k: v.to(self.device) for k, v in batch.items()}
             embeddings = self.colpali(**batch)
 
         return embeddings[0]
@@ -135,7 +138,6 @@ class ColpaliModel(Model):
     def encode_doc(self, images: List[Image]) -> List[torch.Tensor]:
         with torch.no_grad():
             batch = self.processor.process_images(images)
-            batch = {k: v.to(self.device) for k, v in batch.items()}
             embeddings = self.colpali(**batch)
 
         return list(torch.unbind(embeddings))
@@ -150,9 +152,8 @@ class ColpaliModel(Model):
 
         return scores.squeeze(0)  # Remove batch dimension
 
-    @property
-    def use_gpu(self):
-        return self.device == "cuda"
+    def to_device(self, T: torch.Tensor):
+        return T.to(_get_module_device(self.colpali))
 
     @property
     def dim(self):
