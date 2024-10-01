@@ -131,6 +131,7 @@ class ColpaliModel(Model):
     def encode_query(self, q: str) -> torch.Tensor:
         with torch.no_grad():
             batch = self.processor.process_queries([q])
+            batch = {k: self.to_device(v) for k, v in batch.items()}
             embeddings = self.colpali(**batch)
 
         return embeddings[0]
@@ -138,6 +139,7 @@ class ColpaliModel(Model):
     def encode_doc(self, images: List[Image]) -> List[torch.Tensor]:
         with torch.no_grad():
             batch = self.processor.process_images(images)
+            batch = {k: self.to_device(v) for k, v in batch.items()}
             embeddings = self.colpali(**batch)
 
         return list(torch.unbind(embeddings))
