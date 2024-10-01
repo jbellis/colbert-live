@@ -3,18 +3,15 @@ import io
 import os
 import tempfile
 from pathlib import Path
-from typing import List, Optional
-import time
 
-from tqdm import tqdm
+from PIL import Image
+from pdf2image import convert_from_path
+from term_image.image import AutoImage
 
 from colbert_live.colbert_live import ColbertLive
 from colbert_live.models import Model
 from .db import CmdlineDB
-from pdf2image import convert_from_path
-from PIL import Image
-import io
-from term_image.image import AutoImage
+
 
 def page_images_from(filename):
     file_path = Path(filename)

@@ -19,7 +19,7 @@ def _expand(x, a, b, c):
         return 0
     return max(x, int(a + b*x + c*x*math.log(x)))
 
-def _pool_query_embeddings(query_embeddings: torch.Tensor, max_distance: float, use_gpu: bool) -> torch.Tensor:
+def _pool_query_embeddings(query_embeddings: torch.Tensor, max_distance: float) -> torch.Tensor:
     # Convert embeddings to numpy for clustering
     embeddings_np = query_embeddings.cpu().numpy()
     # Cluster
