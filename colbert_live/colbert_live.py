@@ -38,9 +38,7 @@ def _pool_query_embeddings(query_embeddings: torch.Tensor, max_distance: float) 
         cluster_embeddings = query_embeddings[cluster_indices]
         if len(cluster_embeddings) > 1:
             # average the embeddings in the cluster
-            pooled_embedding = cluster_embeddings.mean(dim=0)
-            if use_gpu:
-                pooled_embedding = pooled_embedding.cuda()
+            pooled_embedding = cluster_embeddings.mean(dim=0).to(query_embeddings.device)
             # re-normalize the pooled embedding
             pooled_embedding = pooled_embedding / torch.norm(pooled_embedding, p=2)
             pooled_embeddings.append(pooled_embedding)
@@ -50,11 +48,11 @@ def _pool_query_embeddings(query_embeddings: torch.Tensor, max_distance: float) 
 
     return torch.stack(pooled_embeddings)
 
+
 class ColbertLive:
     def __init__(self,
                  db: DB,
-                 model_name: str = 'answerdotai/answerai-colbert-small-v1',
-                 tokens_per_query: int = 32,
+                 model: Model,
                  doc_pool_factor: int = 2,
                  query_pool_distance: float = 0.03
                  ):
@@ -64,7 +62,6 @@ class ColbertLive:
         Args:
             model_name: The name of the ColBERT model to use.
             db: The database instance to use for querying and storing embeddings.
-            tokens_per_query (optional): the maximum number of tokens to generate per query.
             doc_pool_factor (optional): The factor by which to pool document embeddings, as the number of embeddings per cluster.
                 `None` to disable.
             query_pool_distance (optional): The maximum cosine distance across which to pool query embeddings.
@@ -75,11 +72,9 @@ class ColbertLive:
             query_pool_distance and tokens_per_query are only used by search and encode_query.
         """
         self.db = db
+        self.model = model
         self.doc_pool_factor = doc_pool_factor
         self.query_pool_distance = query_pool_distance
-        self._cf = ColBERTConfig(checkpoint=model_name, query_maxlen=tokens_per_query)
-        self._cp = Checkpoint(self._cf.checkpoint, colbert_config=self._cf)
-        self.encoder = CollectionEncoder(self._cf, self._cp)
 
     def encode_query(self, q: str) -> torch.Tensor:
         """
@@ -91,11 +86,12 @@ class ColbertLive:
         Returns:
             A tensor of query embeddings.
         """
-        query_embeddings = self._cp.queryFromText([q])[0]  # Get embeddings for a single query
+        query_embeddings = self.model.encode_query(q)  # Get embeddings for a single query
+        query_embeddings = query_embeddings.float()  # Convert to float32
         if not self.query_pool_distance:
             result = query_embeddings  # Add batch dimension
         else:
-            result = _pool_query_embeddings(query_embeddings, self.query_pool_distance, self._cp.use_gpu)  # Add batch dimension
+            result = _pool_query_embeddings(query_embeddings, self.query_pool_distance)  # Add batch dimension
         return result.unsqueeze(0)
 
     def encode_chunks(self, chunks: List[str]) -> List[torch.Tensor]:
@@ -115,26 +111,20 @@ class ColbertLive:
             A list of 2D tensors of embeddings, one for each input chunk.
             Each tensor has shape (num_embeddings, embedding_dim), where num_embeddings is variable (one per token).
         """
-        # Tokenize and encode the content
-        input_ids, attention_mask = self._cp.doc_tokenizer.tensorize(chunks)
-        D, mask = self._cp.doc(input_ids, attention_mask, keep_dims='return_mask')
+        embeddings_list = self.model.encode_doc(chunks)
 
-        embeddings_list = []
-        for i in range(len(chunks)):
-            # Remove padding and apply mask for each document
-            Di = D[i]
-            maski = mask[i].squeeze(-1).bool()
-            Di = Di[maski]  # Keep only non-padded embeddings
-
-            # Apply pooling if pool_factor > 1
-            if self.doc_pool_factor and self.doc_pool_factor > 1:
+        # Apply pooling if pool_factor > 1
+        if self.doc_pool_factor and self.doc_pool_factor > 1:
+            for i, Di in enumerate(embeddings_list):
+                # Convert to float32 before pooling
+                Di = Di.float()
                 Di, _ = pool_embeddings_hierarchical(
                     Di,
                     [Di.shape[0]],  # Single document length
                     pool_factor=self.doc_pool_factor,
                     protected_tokens=0
                 )
-            embeddings_list.append(Di)
+                embeddings_list[i] = Di
 
         return embeddings_list
 
@@ -209,7 +199,7 @@ class ColbertLive:
         # Load document encodings
         D_packed, D_lengths = self._load_data_and_construct_tensors(candidates)
         # Calculate full ColBERT scores
-        scores = colbert_score_packed(Q, D_packed, D_lengths, config=self._cf)
+        scores = self.model.score(Q, D_packed, D_lengths)
 
         # Map the scores back to chunk IDs and sort
         results = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
