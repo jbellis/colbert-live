@@ -49,7 +49,7 @@ class Model(ABC):
         Calculate ColBERT scores for given query and document embeddings.
 
         Args:
-            Q: Query embeddings tensor.
+            Q: 2D Query embeddings tensor.
             D_packed: Packed document embeddings tensor.
             D_lengths: Tensor of document lengths.
 
@@ -102,7 +102,8 @@ class ColbertModel(Model):
         return embeddings_list
 
     def score(self, Q: torch.Tensor, D_packed: torch.Tensor, D_lengths: torch.Tensor) -> torch.Tensor:
-        return colbert_score_packed(Q, D_packed, D_lengths, config=self.config)
+        # colbert_score_packed expects a 3D query tensor even though it only operates on a single query
+        return colbert_score_packed(Q.unsqueeze(0), D_packed, D_lengths, config=self.config)
 
     @property
     def use_gpu(self):
@@ -144,7 +145,8 @@ class ColpaliModel(Model):
         D = torch.split(D_packed, D_lengths.tolist())
 
         # Compute scores using the processor's score method
-        scores = self.processor.score(Q, D)
+        # ColPaLi scoring is a batch interface, so unsqueeze here
+        scores = self.processor.score(Q.unsqueeze(0), D)
 
         return scores.squeeze(0)  # Remove batch dimension
 
