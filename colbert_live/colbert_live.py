@@ -109,16 +109,15 @@ class ColbertLive:
         GPU acceleration, then this should not matter very much.)
 
         Returns:
-            A list of 2D tensors of embeddings, one for each input chunk.
+            A list of 2D tensors of float32 embeddings, one for each input chunk.
             Each tensor has shape (num_embeddings, embedding_dim), where num_embeddings is variable (one per token).
         """
-        embeddings_list = self.model.encode_doc(chunks)
+        embeddings_list = [Di.float() for Di in self.model.encode_doc(chunks)]
 
         # Apply pooling if pool_factor > 1
         if self.doc_pool_factor and self.doc_pool_factor > 1:
             for i, Di in enumerate(embeddings_list):
                 # Convert to float32 before pooling
-                Di = Di.float()
                 Di, _ = pool_embeddings_hierarchical(
                     Di,
                     [Di.shape[0]],  # Single document length
