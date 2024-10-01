@@ -47,10 +47,10 @@ pip install colbert-live
 
 Two cheat sheets are available:
 - Using ColBERT Live! with Astra:
-  [for humans](https://github.com/jbellis/colbert-live/blob/master/docs/colbert-live-astra.md)
+  [for humans](https://github.com/jbellis/colbert-live/blob/master/docs/colbert-live-astra.md);
   [for LLMs](https://raw.githubusercontent.com/jbellis/colbert-live/refs/heads/master/docs/colbert-live-astra.md)
 - Implementing a new DB subclass:
-  [for humans](https://github.com/jbellis/colbert-live/blob/master/docs/colbert-live-db.md)
+  [for humans](https://github.com/jbellis/colbert-live/blob/master/docs/colbert-live-db.md);
   [for LLMs](https://raw.githubusercontent.com/jbellis/colbert-live/refs/heads/master/docs/colbert-live-db.md)
 
 ## Supported databases
