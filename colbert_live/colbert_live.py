@@ -1,9 +1,9 @@
 import math
-from typing import List, Any, Optional
-from typing import Tuple
+from typing import Any, Optional
 
 import numpy as np
 import torch
+from PIL.Image import Image
 from colbert.modeling.checkpoint import pool_embeddings_hierarchical
 from sklearn.cluster import AgglomerativeClustering
 
@@ -60,8 +60,8 @@ class ColbertLive:
         Initialize the ColbertLive instance.
 
         Args:
-            model_name: The name of the ColBERT model to use.
             db: The database instance to use for querying and storing embeddings.
+            Model: The ColBERT or ColPaLi model class to use.
             doc_pool_factor (optional): The factor by which to pool document embeddings, as the number of embeddings per cluster.
                 `None` to disable.
             query_pool_distance (optional): The maximum cosine distance across which to pool query embeddings.
@@ -94,12 +94,13 @@ class ColbertLive:
             result = _pool_query_embeddings(query_embeddings, self.query_pool_distance)  # Add batch dimension
         return result.unsqueeze(0)
 
-    def encode_chunks(self, chunks: List[str]) -> List[torch.Tensor]:
+    def encode_chunks(self, chunks: list[str | Image]) -> list[torch.Tensor]:
         """
         Encode a batch of document chunks into tensors of embeddings.
 
         Args:
-            chunks: A list of content strings to encode.
+            chunks: A list of content strings or images to encode.  (The type of data must match what
+            your Model can process.)
 
         Performance note: while it is perfectly legitimate to encode a single chunk at a time, this method
         is designed to support multiple chunks because that means we can dispatch all of that work to the GPU
@@ -128,7 +129,7 @@ class ColbertLive:
 
         return embeddings_list
 
-    def _load_data_and_construct_tensors(self, chunk_ids: List[Any]) -> Tuple[torch.Tensor, torch.Tensor]:
+    def _load_data_and_construct_tensors(self, chunk_ids: list[Any]) -> tuple[torch.Tensor, torch.Tensor]:
         all_embeddings = []
         lengths = []
 
@@ -150,7 +151,7 @@ class ColbertLive:
                k: int = 10,
                n_ann_docs: Optional[int] = None,
                n_maxsim_candidates: Optional[int] = None
-               ) -> List[Tuple[Any, float]]:
+               ) -> list[tuple[Any, float]]:
         """
         Perform a ColBERT search and return the top chunk IDs with their scores.
 
@@ -169,7 +170,7 @@ class ColbertLive:
         but you will want to keep `n_colbert_candidates` as low as possible.
 
         Returns:
-            List[(Any, float)]: A list of tuples of (chunk_id, ColBERT score) for the top k chunks.
+            list[tuple[Any, float]]: A list of tuples of (chunk_id, ColBERT score) for the top k chunks.
         """
         Q = self.encode_query(query)
         return self._search(Q, k, n_ann_docs, n_maxsim_candidates)

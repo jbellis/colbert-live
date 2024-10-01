@@ -23,7 +23,9 @@ classifiers = [
 dependencies = [
     "colbert-ai==0.2.20",
     "torch>=1.13",
-    "colpali-engine>=0.3.0,<0.4.0"
+    "colpali-engine>=0.3.0,<0.4.0",
+    "PIL",
+    "scikit-learn",
 ]
 
 [project.urls]
