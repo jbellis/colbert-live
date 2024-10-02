@@ -8,7 +8,7 @@ from typing import Any
 
 import torch
 from cassandra.auth import PlainTextAuthProvider
-from cassandra.cluster import Cluster, ResultSet
+from cassandra.cluster import Cluster, ResultSet, NoHostAvailable
 from cassandra.cluster import EXEC_PROFILE_DEFAULT
 from cassandra.concurrent import ConcurrentExecutorListResults
 from cassandra.concurrent import execute_concurrent_with_args
@@ -225,7 +225,10 @@ class AstraCQL(DB):
     def _connect_local(self):
         reconnection_policy = ExponentialReconnectionPolicy(base_delay=1, max_delay=60)
         self.cluster = Cluster(reconnection_policy=reconnection_policy)
-        self.session = self.cluster.connect()
+        try:
+            self.session = self.cluster.connect()
+        except NoHostAvailable:
+            raise ConnectionError("ASTRA_DB_TOKEN and ASTRA_DB_ID not set but Cassandra is not running locally")
 
     def _connect_astra(self, token: str, db_id: str):
         scb_path = _get_secure_connect_bundle(token, db_id, self.verbose)

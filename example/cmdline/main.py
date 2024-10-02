@@ -73,18 +73,6 @@ def search_documents(db, colbert_live, query, k=5):
         print("No results found")
 
 
-def get_astra_params():
-    astra_db_id = os.getenv("ASTRA_DB_ID")
-    if not astra_db_id:
-        print("Error: ASTRA_DB_ID environment variable must be set")
-        exit(1)
-    astra_token = os.getenv("ASTRA_DB_TOKEN")
-    if not astra_token:
-        print("Error: ASTRA_DB_TOKEN environment variable must be set")
-        exit(1)
-    return astra_db_id, astra_token
-
-
 def main():
     parser = argparse.ArgumentParser(description="Colbert Live Demo")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -99,8 +87,7 @@ def main():
     args = parser.parse_args()
 
     model = Model.from_name_or_path('vidore/colpali-v1.2')
-    astra_db_id, astra_token = get_astra_params()
-    db = CmdlineDB('colpali', model.dim, astra_db_id, astra_token)
+    db = CmdlineDB('colpali', model.dim, os.getenv("ASTRA_DB_ID"), os.getenv("ASTRA_DB_TOKEN"))
     colbert_live = ColbertLive(db, model)
 
     if args.command == "add":
