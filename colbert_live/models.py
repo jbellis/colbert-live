@@ -6,7 +6,7 @@ from PIL.Image import Image
 from colbert import Checkpoint
 from colbert.indexing.collection_encoder import CollectionEncoder
 from colbert.infra import ColBERTConfig
-from colbert.modeling.colbert import colbert_score_packed
+from colbert.modeling.colbert import ColBERT, colbert_score_packed
 from colpali_engine.models import ColPali, ColPaliProcessor
 
 import warnings
@@ -129,6 +129,9 @@ class ColpaliModel(Model):
             device_map="auto",
         ).eval()
         self.processor = ColPaliProcessor.from_pretrained(model_name)
+        if ColBERTConfig().total_visible_gpus == 0:
+            ColBERT.try_load_torch_extensions(False)
+
 
     def encode_query(self, q: str) -> torch.Tensor:
         with torch.no_grad():
@@ -147,14 +150,9 @@ class ColpaliModel(Model):
         return list(torch.unbind(embeddings))
 
     def score(self, Q: torch.Tensor, D_packed: torch.Tensor, D_lengths: torch.Tensor) -> torch.Tensor:
-        # Unpack D_packed into a list of tensors based on D_lengths
-        D = torch.split(D_packed, D_lengths.tolist())
-
-        # Compute scores using the processor's score method
-        # ColPaLi scoring is a batch interface, so unsqueeze here
-        scores = self.processor.score(Q.unsqueeze(0), D)
-
-        return scores.squeeze(0)  # Remove batch dimension
+        # We don't pass a config object because the default is good enough for what we need
+        # (which is just reading total_visible_gpus to decide whether to call the C++ extension)
+        return colbert_score_packed(Q.unsqueeze(0), D_packed, D_lengths)
 
     def to_device(self, T: torch.Tensor):
         return T.to(_get_module_device(self.colpali))
