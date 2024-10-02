@@ -41,9 +41,20 @@ pip install colbert-live
 
 ## Usage
 
-- Subclass your database backend and implement the required methods for retrieving embeddings
-- Initialize ColbertLive(db)
-- Call ColbertLive.search(query_str, top_k)
+- Subclass your database backend and implement the required methods for retrieving embeddings:
+  ```
+  from colbert_live.db.astra import AstraCql
+  
+  class MyDB(AstraCql):
+    ...
+  
+  db = MyDB()
+  ```
+- Instantiate 
+  `model = colbert_live.models.ColbertModel()` or
+  `model = colbert_live.models.ColpaliModel()`
+- Initialize `colbert = ColbertLive(db, model)`
+- Call `colbert.search(query_str, top_k)`
 
 Two cheat sheets are available:
 - Using ColBERT Live! with Astra:
