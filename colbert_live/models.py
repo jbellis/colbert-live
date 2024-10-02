@@ -70,16 +70,6 @@ class Model(ABC):
     def dim(self):
         pass
 
-    @staticmethod
-    def from_name_or_path(name_or_path: str, **kwargs):
-        if 'colbert' in name_or_path.lower():
-            return ColbertModel(name_or_path, **kwargs)
-        elif 'colpali' in name_or_path.lower():
-            return ColpaliModel(name_or_path, **kwargs)
-        else:
-            raise ValueError(
-                f"Unknown model: {name_or_path}. You can manually instantiate an instance of ColbertModel or ColpaliModel.")
-
 
 def _get_module_device(module):
     return next(module.parameters()).device
@@ -151,9 +141,10 @@ class ColpaliModel(Model):
         with torch.no_grad():
             batch = self.processor.process_images(images)
             batch = {k: self.to_device(v) for k, v in batch.items()}
-            embeddings = self.colpali(**batch)
+            raw_embeddings = self.colpali(**batch)
 
-        return list(torch.unbind(embeddings))
+        # Discard zero vectors from the embeddings tensor
+        return [emb[emb.norm(dim=-1) > 0] for emb in raw_embeddings]
 
     def score(self, Q: torch.Tensor, D_packed: torch.Tensor, D_lengths: torch.Tensor) -> torch.Tensor:
         # We don't pass a config object because the default is good enough for what we need
