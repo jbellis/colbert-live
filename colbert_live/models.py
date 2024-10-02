@@ -86,7 +86,7 @@ def _get_module_device(module):
 
 
 class ColbertModel(Model):
-    def __init__(self, model_name: str, tokens_per_query: int = 32):
+    def __init__(self, model_name: str = 'answerdotai/answerai-colbert-small-v1', tokens_per_query: int = 32):
         self.config = ColBERTConfig(checkpoint=model_name, query_maxlen=tokens_per_query)
         self.checkpoint = Checkpoint(self.config.checkpoint, colbert_config=self.config)
         self.encoder = CollectionEncoder(self.config, self.checkpoint)
@@ -122,7 +122,7 @@ class ColbertModel(Model):
 
 
 class ColpaliModel(Model):
-    def __init__(self, model_name: str):
+    def __init__(self, model_name: str = 'vidore/colqwen2-v0.1'):
         self.colpali = ColPali.from_pretrained(
             model_name,
             torch_dtype=torch.bfloat16,

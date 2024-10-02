@@ -9,7 +9,7 @@ from pdf2image import convert_from_path
 from term_image.image import AutoImage
 
 from colbert_live.colbert_live import ColbertLive
-from colbert_live.models import Model
+from colbert_live.models import Model, ColpaliModel
 from .db import CmdlineDB
 
 
@@ -86,7 +86,7 @@ def main():
 
     args = parser.parse_args()
 
-    model = Model.from_name_or_path('vidore/colpali-v1.2')
+    model = ColpaliModel()
     db = CmdlineDB('colpali', model.dim, os.getenv("ASTRA_DB_ID"), os.getenv("ASTRA_DB_TOKEN"))
     colbert_live = ColbertLive(db, model)
 

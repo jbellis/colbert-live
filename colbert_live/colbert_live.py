@@ -61,7 +61,8 @@ class ColbertLive:
 
         Args:
             db: The database instance to use for querying and storing embeddings.
-            Model: The ColBERT or ColPaLi model class to use.
+            Model: The ColBERT or ColPaLi model class to use.  Generally, `ColbertModel()` or `ColpaliModel()`
+            is all you need, but you can also use `Model.from_name_or_path` to load a specific model.
             doc_pool_factor (optional): The factor by which to pool document embeddings, as the number of embeddings per cluster.
                 `None` to disable.
             query_pool_distance (optional): The maximum cosine distance across which to pool query embeddings.
