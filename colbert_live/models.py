@@ -7,7 +7,7 @@ from colbert import Checkpoint
 from colbert.indexing.collection_encoder import CollectionEncoder
 from colbert.infra import ColBERTConfig
 from colbert.modeling.colbert import ColBERT, colbert_score_packed
-from colpali_engine.models import ColPali, ColPaliProcessor
+from colpali_engine.models import ColPali, ColPaliProcessor, ColQwen2, ColQwen2Processor
 
 import warnings
 
@@ -123,12 +123,18 @@ class ColbertModel(Model):
 
 class ColpaliModel(Model):
     def __init__(self, model_name: str = 'vidore/colqwen2-v0.1'):
-        self.colpali = ColPali.from_pretrained(
+        if 'qwen' in model_name:
+            cls = ColQwen2
+            prs = ColQwen2Processor
+        else:
+            cls = ColPali
+            prs = ColPaliProcessor
+        self.colpali = cls.from_pretrained(
             model_name,
             torch_dtype=torch.bfloat16,
             device_map="auto",
         ).eval()
-        self.processor = ColPaliProcessor.from_pretrained(model_name)
+        self.processor = prs.from_pretrained(model_name)
         if ColBERTConfig().total_visible_gpus == 0:
             ColBERT.try_load_torch_extensions(False)
 
