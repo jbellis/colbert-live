@@ -115,6 +115,16 @@ class ColbertModel(Model):
 
 class ColpaliModel(Model):
     def __init__(self, model_name: str = 'vidore/colqwen2-v0.1'):
+        # for `score()`
+        if ColBERTConfig().total_visible_gpus == 0:
+            ColBERT.try_load_torch_extensions(False)
+
+        # processor is optional (useful for the vidore benchmark: can still compute scores w/o a model)
+        if not model_name:
+            self.processor = None
+            return
+
+        # load processor
         if 'qwen' in model_name:
             cls = ColQwen2
             prs = ColQwen2Processor
@@ -127,8 +137,6 @@ class ColpaliModel(Model):
             device_map="auto",
         ).eval()
         self.processor = prs.from_pretrained(model_name)
-        if ColBERTConfig().total_visible_gpus == 0:
-            ColBERT.try_load_torch_extensions(False)
 
 
     def encode_query(self, q: str) -> torch.Tensor:
