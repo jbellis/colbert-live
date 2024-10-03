@@ -12,7 +12,7 @@ class DB(ABC):
         This informs the decision of which documents to fetch for full ColBERT scoring.
 
         Args:
-            embeddings: A tensor of ColBERT embeddings to compare against.
+            embeddings: A 2D tensor of ColBERT embeddings to compare against.
             limit: The maximum number of results to return for each embedding.
 
         Returns:
@@ -22,7 +22,7 @@ class DB(ABC):
         pass
 
     @abstractmethod
-    def query_chunks(self, pks: list[Any]) -> Iterable[list[torch.Tensor]]:
+    def query_chunks(self, pks: list[Any]) -> Iterable[torch.Tensor]:
         """
         Retrieve all ColBERT embeddings for specific chunks so that ColBERT scores
         can be computed.
@@ -31,6 +31,6 @@ class DB(ABC):
             pks: A list of primary keys (of any object type) identifying the chunks.
 
         Returns:
-            A list of PyTorch tensors representing the ColBERT embeddings for each of the specified chunks.
+            An interable of 2D tensors representing the ColBERT embeddings for each of the specified chunks.
         """
         pass

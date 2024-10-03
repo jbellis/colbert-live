@@ -146,6 +146,7 @@ class ColpaliModel(Model):
         return [emb[emb.norm(dim=-1) > 0] for emb in raw_embeddings]
 
     def score(self, Q: torch.Tensor, D_packed: torch.Tensor, D_lengths: torch.Tensor) -> torch.Tensor:
+        # Use colbert's scoring method because colbert-live operates in the float32 domain instead of bfloat16
         # We don't pass a config object because the default is good enough for what we need
         # (which is just reading total_visible_gpus to decide whether to call the C++ extension)
         return colbert_score_packed(Q.unsqueeze(0), D_packed, D_lengths)

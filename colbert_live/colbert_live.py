@@ -136,7 +136,7 @@ class ColbertLive:
 
         results = self.db.query_chunks(chunk_ids)
         for embeddings_for_chunk in results:
-            packed_one_chunk = self.model.to_device(torch.stack(embeddings_for_chunk))
+            packed_one_chunk = self.model.to_device(embeddings_for_chunk)
             all_embeddings.append(packed_one_chunk)
             lengths.append(packed_one_chunk.shape[0])
 

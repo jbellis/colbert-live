@@ -216,11 +216,12 @@ class AstraCQL(DB):
 
         return ann_results
 
-    def query_chunks(self, chunk_ids: list[Any]) -> list[list[torch.Tensor]]:
+    def query_chunks(self, chunk_ids: list[Any]) -> list[torch.Tensor]:
         if self.verbose: print(f'Loading embeddings from {len(chunk_ids)} chunks for full ColBERT scoring')
         transformed_pks = [pk if isinstance(pk, tuple) else (pk,) for pk in chunk_ids]
         results = execute_concurrent_with_args(self.session, self.query_chunks_stmt, transformed_pks)
-        return [self.process_chunk_rows(result) for success, result in results if success]
+        return [torch.stack(self.process_chunk_rows(result))
+                for success, result in results if success]
 
     def _connect_local(self):
         reconnection_policy = ExponentialReconnectionPolicy(base_delay=1, max_delay=60)
