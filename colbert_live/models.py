@@ -1,5 +1,4 @@
 from abc import ABC, abstractmethod
-from typing import List
 
 import torch
 from PIL.Image import Image
@@ -30,7 +29,7 @@ class Model(ABC):
         pass
 
     @abstractmethod
-    def encode_doc(self, chunks: List[str]) -> List[torch.Tensor]:
+    def encode_doc(self, chunks: list[str|Image]) -> list[torch.Tensor]:
         """
         Encode a batch of document chunks into tensors of embeddings.
 
@@ -86,7 +85,7 @@ class ColbertModel(Model):
     def encode_query(self, q: str) -> torch.Tensor:
         return self.checkpoint.queryFromText([q])[0]
 
-    def encode_doc(self, chunks: List[str]) -> List[torch.Tensor]:
+    def encode_doc(self, chunks: list[str]) -> list[torch.Tensor]:
         input_ids, attention_mask = self.checkpoint.doc_tokenizer.tensorize(chunks)
         D, mask = self.checkpoint.doc(input_ids, attention_mask, keep_dims='return_mask')
 
@@ -137,7 +136,7 @@ class ColpaliModel(Model):
 
         return embeddings[0]
 
-    def encode_doc(self, images: List[Image]) -> List[torch.Tensor]:
+    def encode_doc(self, images: list[Image]) -> list[torch.Tensor]:
         with torch.no_grad():
             batch = self.processor.process_images(images)
             batch = {k: self.to_device(v) for k, v in batch.items()}
