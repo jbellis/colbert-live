@@ -109,6 +109,9 @@ class ColbertModel(Model):
     def dim(self):
         return self._dim
 
+    def __str__(self):
+        return f"ColbertModel(model={self.colpali.model_name}, dim={self.dim}, device={_get_module_device(self.colpali)})"
+
 
 class ColpaliModel(Model):
     def __init__(self, model_name: str = 'vidore/colqwen2-v0.1'):
@@ -157,3 +160,6 @@ class ColpaliModel(Model):
     @property
     def dim(self):
         return self.colpali.dim
+
+    def __str__(self):
+        return f"ColpaliModel(model={self.colpali.model_name}, dim={self.dim}, device={_get_module_device(self.colpali)})"
