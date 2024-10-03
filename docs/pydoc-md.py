@@ -56,9 +56,7 @@ def pydoc_to_markdown(module_name, class_name):
         md += f"### Constructor\n\n#### `__init__{signature}`\n\n"
         if cls.__init__.__doc__:
             md += format_docstring(cls.__init__.__doc__)
-        else:
-            md += "No description available.\n\n"
-    
+
     # Get methods
     methods = inspect.getmembers(cls, predicate=inspect.isfunction)
     
@@ -75,9 +73,7 @@ def pydoc_to_markdown(module_name, class_name):
             # Method docstring
             if method.__doc__:
                 md += format_docstring(method.__doc__)
-            else:
-                md += "No description available.\n\n"
-    
+
     # Get data descriptors (properties)
     properties = inspect.getmembers(cls, lambda o: isinstance(o, property))
     
@@ -91,9 +87,6 @@ def pydoc_to_markdown(module_name, class_name):
             
             if prop.__doc__:
                 md += format_docstring(prop.__doc__)
-            else:
-                md += "No description available.\n\n"
-    
     return md
 
 def main():
@@ -106,19 +99,10 @@ def main():
 
     # Add the current directory to sys.path to allow importing from the current directory
     sys.path.insert(0, os.getcwd())
-    
-    try:
-        markdown_doc = pydoc_to_markdown(module_name, class_name)
-        
-        # Print to stdout
-        print(markdown_doc)
-    
-    except ImportError:
-        print(f"Error: Could not import module '{module_name}'", file=sys.stderr)
-        sys.exit(1)
-    except AttributeError:
-        print(f"Error: Class '{class_name}' not found in module '{module_name}'", file=sys.stderr)
-        sys.exit(1)
+
+    markdown_doc = pydoc_to_markdown(module_name, class_name)
+    print(markdown_doc)
+
 
 if __name__ == "__main__":
     main()
