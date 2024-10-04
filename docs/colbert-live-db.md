@@ -13,7 +13,7 @@ This informs the decision of which documents to fetch for full ColBERT scoring.
 
 **Arguments:**
 
-- `embeddings`: A tensor of ColBERT embeddings to compare against.
+- `embeddings`: A 2D tensor of ColBERT embeddings to compare against.
 - `limit`: The maximum number of results to return for each embedding.
   
 
@@ -22,7 +22,7 @@ This informs the decision of which documents to fetch for full ColBERT scoring.
   A list of lists, one per embedding, where each inner list contains tuples of (PK, similarity)
   for the chunks closest to each query embedding.
 
-#### `query_chunks(self, pks: list[typing.Any]) -> Iterable[list[torch.Tensor]]`
+#### `query_chunks(self, pks: list[typing.Any]) -> Iterable[torch.Tensor]`
 
 Retrieve all ColBERT embeddings for specific chunks so that ColBERT scores
 can be computed.
@@ -35,7 +35,7 @@ can be computed.
 
 **Returns:**
 
-  A list of PyTorch tensors representing the ColBERT embeddings for each of the specified chunks.
+  An interable of 2D tensors representing the ColBERT embeddings for each of the specified chunks.
 
 
 
@@ -48,11 +48,14 @@ import os
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import Future
 from typing import Any
 
 import torch
 from cassandra.auth import PlainTextAuthProvider
-from cassandra.cluster import Cluster, ResultSet
+from cassandra.cluster import Cluster, ResultSet, NoHostAvailable
+from cassandra.cluster import EXEC_PROFILE_DEFAULT
+from cassandra.concurrent import ConcurrentExecutorListResults
 from cassandra.concurrent import execute_concurrent_with_args
 from cassandra.policies import ExponentialReconnectionPolicy
 
@@ -258,16 +261,20 @@ class AstraCQL(DB):
 
         return ann_results
 
-    def query_chunks(self, chunk_ids: list[Any]) -> list[list[torch.Tensor]]:
+    def query_chunks(self, chunk_ids: list[Any]) -> list[torch.Tensor]:
         if self.verbose: print(f'Loading embeddings from {len(chunk_ids)} chunks for full ColBERT scoring')
         transformed_pks = [pk if isinstance(pk, tuple) else (pk,) for pk in chunk_ids]
         results = execute_concurrent_with_args(self.session, self.query_chunks_stmt, transformed_pks)
-        return [self.process_chunk_rows(result) for success, result in results if success]
+        return [torch.stack(self.process_chunk_rows(result))
+                for success, result in results if success]
 
     def _connect_local(self):
         reconnection_policy = ExponentialReconnectionPolicy(base_delay=1, max_delay=60)
         self.cluster = Cluster(reconnection_policy=reconnection_policy)
-        self.session = self.cluster.connect()
+        try:
+            self.session = self.cluster.connect()
+        except NoHostAvailable:
+            raise ConnectionError("ASTRA_DB_TOKEN and ASTRA_DB_ID not set but Cassandra is not running locally")
 
     def _connect_astra(self, token: str, db_id: str):
         scb_path = _get_secure_connect_bundle(token, db_id, self.verbose)
@@ -324,6 +331,60 @@ class AstraCQL(DB):
             """
             self.session.execute(create_keyspace_query)
             if self.verbose: print(f"Keyspace '{self.keyspace}' created or verified")
+
+
+class ConcurrentExecutorFutureResults(ConcurrentExecutorListResults):
+    def __init__(self, session, statements_and_params, execution_profile, future):
+        super().__init__(session, statements_and_params, execution_profile)
+        self.future = future
+
+    def _put_result(self, result, idx, success):
+        super()._put_result(result, idx, success)
+        with self._condition:
+            if self._current == self._exec_count:
+                if self._exception and self._fail_fast:
+                    self.future.set_exception(self._exception)
+                else:
+                    sorted_results = [r[1] for r in sorted(self._results_queue)]
+                    self.future.set_result(sorted_results)
+
+
+def execute_concurrent_async(
+        session,
+        statements_and_parameters,
+        concurrency=100,
+        raise_on_first_error=False,
+        execution_profile=EXEC_PROFILE_DEFAULT
+):
+    """
+    Asynchronously executes a sequence of (statement, parameters) tuples concurrently.
+
+    Args:
+        session: Cassandra session object.
+        statement_and_parameters: Iterable of (prepared CQL statement, bind parameters) tuples.
+        concurrency (int, optional): Number of concurrent operations. Default is 100.
+        raise_on_first_error (bool, optional): If True, execution stops on the first error. Default is True.
+        execution_profile (ExecutionProfile, optional): Execution profile to use. Default is EXEC_PROFILE_DEFAULT.
+
+    Returns:
+        A `Future` object that will be completed when all operations are done.
+    """
+    # Create a Future object and initialize the custom ConcurrentExecutor with the Future
+    future = Future()
+    executor = ConcurrentExecutorFutureResults(
+        session=session,
+        statements_and_params=statements_and_parameters,
+        execution_profile=execution_profile,
+        future=future
+    )
+
+    # Execute concurrently
+    try:
+        executor.execute(concurrency=concurrency, fail_fast=raise_on_first_error)
+    except Exception as e:
+        future.set_exception(e)
+
+    return future
 
 ```
 

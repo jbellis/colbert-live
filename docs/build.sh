@@ -4,6 +4,8 @@
 # Run this from the main colbert-live source root
 #
 
+mkdir -p docs/sources
+
 echo 'Extracting ColbertLive.md'
 python docs/pydoc-md.py colbert_live ColbertLive > docs/sources/ColbertLive.md
 echo 'Extracting AstraCQL.md'

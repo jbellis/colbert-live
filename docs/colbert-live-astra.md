@@ -13,7 +13,8 @@ Initialize the ColbertLive instance.
 **Arguments:**
 
 - `db`: The database instance to use for querying and storing embeddings.
-- `Model`: The ColBERT or ColPaLi model class to use.
+- `Model`: The Model instance to use for encoding queries and documents.  ColbertModel and ColpaliModel
+  are the two implementations provided by colbert-live.
 - `doc_pool_factor (optional)`: The factor by which to pool document embeddings, as the number of embeddings per cluster.
   `None` to disable.
 - `query_pool_distance (optional)`: The maximum cosine distance across which to pool query embeddings.
@@ -103,7 +104,7 @@ from pdf2image import convert_from_path
 from term_image.image import AutoImage
 
 from colbert_live.colbert_live import ColbertLive
-from colbert_live.models import Model
+from colbert_live.models import Model, ColpaliModel
 from .db import CmdlineDB
 
 
@@ -167,18 +168,6 @@ def search_documents(db, colbert_live, query, k=5):
         print("No results found")
 
 
-def get_astra_params():
-    astra_db_id = os.getenv("ASTRA_DB_ID")
-    if not astra_db_id:
-        print("Error: ASTRA_DB_ID environment variable must be set")
-        exit(1)
-    astra_token = os.getenv("ASTRA_DB_TOKEN")
-    if not astra_token:
-        print("Error: ASTRA_DB_TOKEN environment variable must be set")
-        exit(1)
-    return astra_db_id, astra_token
-
-
 def main():
     parser = argparse.ArgumentParser(description="Colbert Live Demo")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -192,9 +181,8 @@ def main():
 
     args = parser.parse_args()
 
-    model = Model.from_name_or_path('vidore/colpali-v1.2')
-    astra_db_id, astra_token = get_astra_params()
-    db = CmdlineDB('colpali', model.dim, astra_db_id, astra_token)
+    model = ColpaliModel()
+    db = CmdlineDB('colpali', model.dim, os.getenv("ASTRA_DB_ID"), os.getenv("ASTRA_DB_TOKEN"))
     colbert_live = ColbertLive(db, model)
 
     if args.command == "add":
@@ -261,8 +249,6 @@ to customize the behavior for their specific use case.
 ### Constructor
 
 #### `__init__(self, keyspace: str, embedding_dim: int, astra_db_id: str | None, astra_token: str | None, verbose: bool = False)`
-
-No description available.
 
 ### Methods
 
@@ -350,11 +336,7 @@ Note:
 
 #### `query_ann(self, embeddings: torch.Tensor, limit: int) -> list[list[tuple[typing.Any, float]]]`
 
-No description available.
-
-#### `query_chunks(self, chunk_ids: list[typing.Any]) -> list[list[torch.Tensor]]`
-
-No description available.
+#### `query_chunks(self, chunk_ids: list[typing.Any]) -> list[torch.Tensor]`
 
 
 
