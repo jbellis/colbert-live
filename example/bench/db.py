@@ -52,7 +52,7 @@ class ExponentialRetryPolicy(RetryPolicy):
         return self.RETHROW, None
 
 
-class BeirDB(AstraCQL):
+class BenchDB(AstraCQL):
     def __init__(self, keyspace: str, embedding_dim: int, astra_db_id: str, astra_token: str):
         super().__init__(keyspace, embedding_dim, astra_db_id, astra_token)
         self.cluster.default_retry_policy = ExponentialRetryPolicy(max_retries=5, base_delay=1, max_delay=60)

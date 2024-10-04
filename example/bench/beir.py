@@ -14,7 +14,7 @@ from tqdm import tqdm
 from colbert_live import ColbertLive
 from colbert_live.db.astra import execute_concurrent_async
 from colbert_live.models import ColbertModel
-from .db import BeirDB
+from .db import BenchDB
 
 
 #
@@ -118,7 +118,7 @@ def test_all(datasets):
                 ks_name += f'pool{doc_pool_factor}'
 
             model = ColbertModel(model_name, tokens_per_query=tokens_per_query)
-            db = BeirDB(ks_name, model.dim, os.environ.get('ASTRA_DB_ID'), os.environ.get('ASTRA_DB_TOKEN'))
+            db = BenchDB(ks_name, model.dim, os.environ.get('ASTRA_DB_ID'), os.environ.get('ASTRA_DB_TOKEN'))
             colbert_live = ColbertLive(db, model, doc_pool_factor=doc_pool_factor)
             corpus, queries, qrels = download_and_load_dataset(dataset)
             compute_and_store_embeddings(corpus, db, colbert_live)
