@@ -6,7 +6,7 @@ This documents how to implement a DB subclass for use with ColbertLive.  DB is a
 As an example, here is the source for AstraCQL, which implements DB for use with Astra, a hosted Cassandra database
 that uses CQL.
 ```
-{../colbert_live/db/astra.py}
+{sources/AstraCQL-stripped.py}
 ```
 
 Note how AstraCQL gives extension points for subclasses to adapt ColbertLive for their schema, but AstraCQL itself

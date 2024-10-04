@@ -342,7 +342,7 @@ Note:
 
 ```
 
-## AstraCQL example
+## Example of subclassing AstraCQL
 ```
 import uuid
 from typing import List, Any

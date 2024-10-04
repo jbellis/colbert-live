@@ -13,7 +13,7 @@ Next, you will need to subclass AstraCQL:
 {sources/AstraCQL.md}
 ```
 
-## AstraCQL example
+## Example of subclassing AstraCQL
 ```
 {../example/cmdline/db.py}
 ```

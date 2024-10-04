@@ -43,63 +43,6 @@ can be computed.
 As an example, here is the source for AstraCQL, which implements DB for use with Astra, a hosted Cassandra database
 that uses CQL.
 ```
-import json
-import os
-import time
-import urllib.error
-import urllib.request
-from concurrent.futures import Future
-from typing import Any
-
-import torch
-from cassandra.auth import PlainTextAuthProvider
-from cassandra.cluster import Cluster, ResultSet, NoHostAvailable
-from cassandra.cluster import EXEC_PROFILE_DEFAULT
-from cassandra.concurrent import ConcurrentExecutorListResults
-from cassandra.concurrent import execute_concurrent_with_args
-from cassandra.policies import ExponentialReconnectionPolicy
-
-from .db import DB
-
-_model_dimensions = {'colbertv2.0': 128,
-                     'answerai-colbert-small-v1': 96}
-
-def _get_astra_bundle_url(db_id, token):
-    # set up the request
-    url = f"https://api.astra.datastax.com/v2/databases/{db_id}/secureBundleURL"
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
-
-    req = urllib.request.Request(url, method="POST", headers=headers, data=b"")
-    try:
-        with urllib.request.urlopen(req) as response:
-            response_data = json.loads(response.read().decode())
-            # happy path
-            if 'downloadURL' in response_data:
-                return response_data['downloadURL']
-            # handle errors
-            if 'errors' in response_data:
-                raise Exception(response_data['errors'][0]['message'])
-            raise Exception('Unknown error in ' + str(response_data))
-    except urllib.error.URLError as e:
-        raise Exception(f"Error connecting to Astra API: {str(e)}")
-
-def _get_secure_connect_bundle(token: str, db_id: str, verbose: bool = False) -> str:
-    scb_path = f'astra-secure-connect-{db_id}.zip'
-    if not os.path.exists(scb_path):
-        if verbose: print('Downloading Secure Cloud Bundle')
-        url = _get_astra_bundle_url(db_id, token)
-        try:
-            with urllib.request.urlopen(url) as r:
-                with open(scb_path, 'wb') as f:
-                    f.write(r.read())
-        except urllib.error.URLError as e:
-            raise Exception(f"Error downloading secure connect bundle: {str(e)}")
-    return scb_path
-
-
 class AstraCQL(DB):
     """
     AstraCQL implements the ColBERT Live DB interface for Astra CQL databases as well as local Cassandra.
@@ -146,26 +89,22 @@ class AstraCQL(DB):
     Raises:
         Exception: If Astra credentials are incomplete or connection fails.
     """
-    def __init__(self,
-                 keyspace: str,
-                 embedding_dim: int,
-                 astra_db_id: str | None,
-                 astra_token: str | None,
-                 verbose: bool = False):
+
+    def __init__(self, keyspace: str, embedding_dim: int, astra_db_id: str | None, astra_token: str | None, verbose: bool=False):
         self.verbose = verbose
         self.embedding_dim = embedding_dim
         self.keyspace = keyspace
-        
         if not astra_token:
-            if self.verbose: print('Connecting to local Cassandra')
+            if self.verbose:
+                print('Connecting to local Cassandra')
             self._connect_local()
         else:
             if not astra_db_id:
                 raise Exception('ASTRA_DB_ID not set')
-            if self.verbose: print(f'Connecting to Astra db {astra_db_id}')
+            if self.verbose:
+                print(f'Connecting to Astra db {astra_db_id}')
             self._connect_astra(astra_token, astra_db_id)
-        self.session.default_timeout = 60  # this is the client timeout, server still has internal timeouts
-
+        self.session.default_timeout = 60
         self._maybe_create_keyspace(astra_db_id, astra_token)
         self.prepare(embedding_dim)
 
@@ -248,25 +187,24 @@ class AstraCQL(DB):
         raise NotImplementedError('Subclasses must implement process_chunk_rows')
 
     def query_ann(self, embeddings: torch.Tensor, limit: int) -> list[list[tuple[Any, float]]]:
-        if self.verbose: print(f'Querying ANN with {len(embeddings)} embeddings')
+        if self.verbose:
+            print(f'Querying ANN with {len(embeddings)} embeddings')
         embedding_list = embeddings.tolist()
         params = [(emb, emb, limit) for emb in embedding_list]
         results = execute_concurrent_with_args(self.session, self.query_ann_stmt, params)
-
         ann_results = []
-        for success, result in results:
+        for (success, result) in results:
             if not success:
                 raise Exception('Failed to execute ANN query')
             ann_results.append(self.process_ann_rows(result))
-
         return ann_results
 
     def query_chunks(self, chunk_ids: list[Any]) -> list[torch.Tensor]:
-        if self.verbose: print(f'Loading embeddings from {len(chunk_ids)} chunks for full ColBERT scoring')
+        if self.verbose:
+            print(f'Loading embeddings from {len(chunk_ids)} chunks for full ColBERT scoring')
         transformed_pks = [pk if isinstance(pk, tuple) else (pk,) for pk in chunk_ids]
         results = execute_concurrent_with_args(self.session, self.query_chunks_stmt, transformed_pks)
-        return [torch.stack(self.process_chunk_rows(result))
-                for success, result in results if success]
+        return [torch.stack(self.process_chunk_rows(result)) for (success, result) in results if success]
 
     def _connect_local(self):
         reconnection_policy = ExponentialReconnectionPolicy(base_delay=1, max_delay=60)
@@ -274,117 +212,47 @@ class AstraCQL(DB):
         try:
             self.session = self.cluster.connect()
         except NoHostAvailable:
-            raise ConnectionError("ASTRA_DB_TOKEN and ASTRA_DB_ID not set but Cassandra is not running locally")
+            raise ConnectionError('ASTRA_DB_TOKEN and ASTRA_DB_ID not set but Cassandra is not running locally')
 
     def _connect_astra(self, token: str, db_id: str):
         scb_path = _get_secure_connect_bundle(token, db_id, self.verbose)
-        cloud_config = {
-            'secure_connect_bundle': scb_path
-        }
+        cloud_config = {'secure_connect_bundle': scb_path}
         auth_provider = PlainTextAuthProvider('token', token)
         reconnection_policy = ExponentialReconnectionPolicy(base_delay=1, max_delay=60)
-        self.cluster = Cluster(
-            cloud=cloud_config,
-            auth_provider=auth_provider,
-            reconnection_policy=reconnection_policy
-        )
+        self.cluster = Cluster(cloud=cloud_config, auth_provider=auth_provider, reconnection_policy=reconnection_policy)
         self.session = self.cluster.connect()
-        if self.verbose: print(f"Connected to Astra db {db_id}")
+        if self.verbose:
+            print(f'Connected to Astra db {db_id}')
 
     def _maybe_create_keyspace(self, db_id, token):
         if token:
-            # Use Astra REST API to create keyspace
-            url = f"https://api.astra.datastax.com/v2/databases/{db_id}/keyspaces/{self.keyspace}"
-            headers = {
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json"
-            }
-            data = json.dumps({
-                "name": self.keyspace
-            }).encode('utf-8')
-            
-            req = urllib.request.Request(url, method="POST", headers=headers, data=data)
-            
+            url = f'https://api.astra.datastax.com/v2/databases/{db_id}/keyspaces/{self.keyspace}'
+            headers = {'Authorization': f'Bearer {token}', 'Content-Type': 'application/json'}
+            data = json.dumps({'name': self.keyspace}).encode('utf-8')
+            req = urllib.request.Request(url, method='POST', headers=headers, data=data)
             try:
                 with urllib.request.urlopen(req) as response:
                     if response.status == 201:
-                        if self.verbose: print(f"Keyspace '{self.keyspace}' created or verified")
-                        # Wait for the keyspace to be available (max 10 seconds)
+                        if self.verbose:
+                            print(f"Keyspace '{self.keyspace}' created or verified")
                         start_time = time.time()
                         while time.time() - start_time < 10:
                             try:
-                                self.session.execute(f"USE {self.keyspace}")
+                                self.session.execute(f'USE {self.keyspace}')
                                 break
                             except Exception:
                                 time.sleep(0.1)
                         else:
                             raise Exception(f"Keyspace '{self.keyspace}' creation successful, but still unavailable after 10 seconds")
                     else:
-                        raise Exception(f"Failed to create keyspace: {response.read().decode()}")
+                        raise Exception(f'Failed to create keyspace: {response.read().decode()}')
             except urllib.error.HTTPError as e:
-                raise Exception(f"Failed to create keyspace: {e.read().decode()}")
+                raise Exception(f'Failed to create keyspace: {e.read().decode()}')
         else:
-            # Use CQL to create keyspace
-            create_keyspace_query = f"""
-            CREATE KEYSPACE IF NOT EXISTS {self.keyspace}
-            WITH replication = {{'class': 'SimpleStrategy', 'replication_factor': 1}}
-            """
+            create_keyspace_query = f"\n            CREATE KEYSPACE IF NOT EXISTS {self.keyspace}\n            WITH replication = {{'class': 'SimpleStrategy', 'replication_factor': 1}}\n            "
             self.session.execute(create_keyspace_query)
-            if self.verbose: print(f"Keyspace '{self.keyspace}' created or verified")
-
-
-class ConcurrentExecutorFutureResults(ConcurrentExecutorListResults):
-    def __init__(self, session, statements_and_params, execution_profile, future):
-        super().__init__(session, statements_and_params, execution_profile)
-        self.future = future
-
-    def _put_result(self, result, idx, success):
-        super()._put_result(result, idx, success)
-        with self._condition:
-            if self._current == self._exec_count:
-                if self._exception and self._fail_fast:
-                    self.future.set_exception(self._exception)
-                else:
-                    sorted_results = [r[1] for r in sorted(self._results_queue)]
-                    self.future.set_result(sorted_results)
-
-
-def execute_concurrent_async(
-        session,
-        statements_and_parameters,
-        concurrency=100,
-        raise_on_first_error=False,
-        execution_profile=EXEC_PROFILE_DEFAULT
-):
-    """
-    Asynchronously executes a sequence of (statement, parameters) tuples concurrently.
-
-    Args:
-        session: Cassandra session object.
-        statement_and_parameters: Iterable of (prepared CQL statement, bind parameters) tuples.
-        concurrency (int, optional): Number of concurrent operations. Default is 100.
-        raise_on_first_error (bool, optional): If True, execution stops on the first error. Default is True.
-        execution_profile (ExecutionProfile, optional): Execution profile to use. Default is EXEC_PROFILE_DEFAULT.
-
-    Returns:
-        A `Future` object that will be completed when all operations are done.
-    """
-    # Create a Future object and initialize the custom ConcurrentExecutor with the Future
-    future = Future()
-    executor = ConcurrentExecutorFutureResults(
-        session=session,
-        statements_and_params=statements_and_parameters,
-        execution_profile=execution_profile,
-        future=future
-    )
-
-    # Execute concurrently
-    try:
-        executor.execute(concurrency=concurrency, fail_fast=raise_on_first_error)
-    except Exception as e:
-        future.set_exception(e)
-
-    return future
+            if self.verbose:
+                print(f"Keyspace '{self.keyspace}' created or verified")
 
 ```
 
