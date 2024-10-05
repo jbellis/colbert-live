@@ -60,12 +60,12 @@ class LotteDPRDB:
             INSERT INTO documents (id, text, embedding)
             VALUES (?, ?, ?)
         """)
-        self.search_stmt = f"""
-            SELECT id, text, cosine_similarity(embedding, ?) AS similarity
+        self.search_stmt = self.session.prepare("""
+            SELECT id, text, similarity_cosine(embedding, ?) AS similarity
             FROM documents
             ORDER BY embedding ANN OF ?
             LIMIT ?
-        """
+        """)
 
     def insert_documents(self, documents: List[Tuple[str, str, List[float]]]):
         futures = execute_concurrent_async(self.session, [(self.insert_stmt, doc) for doc in documents])
@@ -134,7 +134,14 @@ def get_embeddings(texts: List[str]) -> List[List[float]]:
     else:
         raise ValueError(f"Invalid embedding provider: {EMBEDDING_PROVIDER}")
 
+def is_populated(db):
+    result = db.session.execute(f"SELECT * FROM {db.keyspace}.documents LIMIT 1")
+    return result.one() is not None
+
 def compute_and_store_embeddings(corpus: Dict, db: LotteDPRDB):
+    if is_populated(db):
+        print("Database not empty, assuming embeddings already computed and stored.")
+        return
     print("Computing and storing document embeddings...")
     start_time = time.time()
     
