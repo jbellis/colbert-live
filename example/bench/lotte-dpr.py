@@ -6,6 +6,8 @@ from typing import Dict, Tuple, List
 from collections import defaultdict
 
 from openai import OpenAI
+import google.generativeai as gemini
+import tiktoken
 from tqdm import tqdm
 from more_itertools import chunked
 
@@ -16,11 +18,20 @@ from colbert_live.db.astra import execute_concurrent_async
 LOTTE_DATA_PATH = os.path.expanduser("~/datasets/lotte")
 
 # Set up OpenAI client
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+# Set up Gemini client
+gemini.configure(api_key=(os.environ.get("GEMINI_API_KEY")))
+
+# Global variables to store the chosen embedding provider and vector size
+EMBEDDING_PROVIDER = None
+VECTOR_SIZE = None
+
+truncated_passages = 0
 
 class LotteDPRDB:
-    def __init__(self, keyspace: str):
-        self.keyspace = keyspace
+    def __init__(self, keyspace: str, embedding_provider: str, vector_size: int):
+        self.keyspace = f"{keyspace}_{embedding_provider}"
+        self.vector_size = vector_size
         self.session = self._connect_astra()
         self._create_schema()
 
@@ -38,10 +49,10 @@ class LotteDPRDB:
             CREATE TABLE IF NOT EXISTS documents (
                 id text PRIMARY KEY,
                 text text,
-                embedding vector<float, 1536>
+                embedding vector<float, %s>
             )
-        """)
-        self.session.execute("""
+        """, [self.vector_size])
+        self.session.execute(f"""
             CREATE CUSTOM INDEX IF NOT EXISTS ON documents (embedding) 
             USING 'StorageAttachedIndex'
         """)
@@ -93,11 +104,35 @@ def load_dataset(dataset: str, split: str) -> Tuple[Dict, Dict, Dict]:
     return corpus, queries, qrels
 
 def get_embeddings(texts: List[str]) -> List[List[float]]:
-    response = client.embeddings.create(
-        input=texts,
-        model="text-embedding-3-small"
-    )
-    return [data.embedding for data in response.data]
+    if EMBEDDING_PROVIDER == "openai":
+        tiktoken_model = tiktoken.encoding_for_model('text-embedding-3-small')
+        def tokenize(text: str) -> List[int]:
+            return tiktoken_model.encode(text, disallowed_special=())
+        def token_length(text: str) -> int:
+            return len(list(tokenize(text)))
+        def truncate_to(text, max_tokens):
+            truncated_tokens = list(tokenize(text))[:max_tokens]
+            truncated_s = tiktoken_model.decode(truncated_tokens)
+            return truncated_s
+        truncated_texts = []
+        for text in texts:
+            if token_length(text) > 8000:
+                global truncated_passages
+                truncated_passages += 1
+                text = truncate_to(text, 8000)
+            truncated_texts.append(text)
+        response = openai_client.embeddings.create(
+            input=truncated_texts,
+            model="text-embedding-3-small"
+        )
+        return [data.embedding for data in response.data]
+    elif EMBEDDING_PROVIDER == "gemini":
+        model = "models/text-embedding-004"
+        result = gemini.embed_content(model=model, content=texts)
+        time.sleep(1.0) # crude rate limit
+        return result['embedding']
+    else:
+        raise ValueError(f"Invalid embedding provider: {EMBEDDING_PROVIDER}")
 
 def compute_and_store_embeddings(corpus: Dict, db: LotteDPRDB):
     print("Computing and storing document embeddings...")
@@ -150,9 +185,9 @@ def write_rankings(results: Dict[str, Dict[str, float]], output_file: str):
                 f.write(f"{qid}\t{pid}\t{rank}\t{score}\n")
 
 def evaluate_lotte(dataset: str, split: str, query_type: str):
-    ks_name = f"lotte_{dataset.replace('-', '')}_openai"
+    ks_name = f"lotte_{dataset.replace('-', '')}"
 
-    db = LotteDPRDB(ks_name)
+    db = LotteDPRDB(ks_name, EMBEDDING_PROVIDER, VECTOR_SIZE)
 
     corpus, all_queries, all_qrels = load_dataset(dataset, split)
     compute_and_store_embeddings(corpus, db)
@@ -169,21 +204,37 @@ def evaluate_lotte(dataset: str, split: str, query_type: str):
 
     print(f"Rankings written to {output_file}")
 
-def main(datasets):
+def main(embedding_provider, datasets):
+    global EMBEDDING_PROVIDER, VECTOR_SIZE, truncated_passages
+    EMBEDDING_PROVIDER = embedding_provider
+    VECTOR_SIZE = 1536 if embedding_provider == "openai" else 768
     for dataset in datasets:
+        truncated_passages = 0
         for query_type in ["search", "forum"]:
             evaluate_lotte(dataset, "test", query_type)
+        print(f"Truncated passages: {truncated_passages} in {dataset}")
 
 if __name__ == "__main__":
     all_datasets = ["writing", "recreation", "science", "technology", "lifestyle"]
 
-    if len(sys.argv) > 1:
-        datasets_to_run = [d for d in sys.argv[1:] if d in all_datasets]
-        unrecognized_datasets = [d for d in sys.argv[1:] if d not in all_datasets]
+    if len(sys.argv) < 2:
+        print("Usage: python lotte-dpr.py <embedding_provider> [dataset1 dataset2 ...]")
+        print("Embedding provider must be either 'openai' or 'gemini'")
+        sys.exit(1)
+
+    embedding_provider = sys.argv[1].lower()
+    if embedding_provider not in ["openai", "gemini"]:
+        print("Invalid embedding provider. Must be either 'openai' or 'gemini'")
+        sys.exit(1)
+
+    if len(sys.argv) > 2:
+        datasets_to_run = [d for d in sys.argv[2:] if d in all_datasets]
+        unrecognized_datasets = [d for d in sys.argv[2:] if d not in all_datasets]
         if unrecognized_datasets:
             print(f"Skipping unrecognized datasets: {', '.join(unrecognized_datasets)}")
     else:
         datasets_to_run = all_datasets
 
+    print(f"Using {embedding_provider} for embeddings")
     print(f"Evaluating datasets: {', '.join(datasets_to_run)}")
-    main(datasets_to_run)
+    main(embedding_provider, datasets_to_run)
