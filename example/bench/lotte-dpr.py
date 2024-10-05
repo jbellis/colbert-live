@@ -160,7 +160,7 @@ def compute_and_store_embeddings(corpus: Dict, db: LotteDPRDB):
     end_time = time.time()
     print(f"Embedding computation and storage completed. Time taken: {end_time - start_time:.2f} seconds")
 
-def search_and_benchmark(queries: Dict, db: LotteDPRDB, k: int = 100) -> Dict[str, Dict[str, float]]:
+def search_and_benchmark(queries: Dict, db: LotteDPRDB, k: int = 5) -> Dict[str, Dict[str, float]]:
     def search_batch(query_batch: List[Tuple[str, str]]) -> List[Tuple[str, Dict[str, float]]]:
         query_ids, query_texts = zip(*query_batch)
         query_embeddings = get_embeddings(query_texts)
@@ -206,7 +206,7 @@ def evaluate_lotte(dataset: str, split: str, query_type: str):
 
     output_dir = f"lotte_rankings/{split}"
     os.makedirs(output_dir, exist_ok=True)
-    output_file = os.path.join(output_dir, f"{dataset}.{query_type}.dpr.ranking.tsv")
+    output_file = os.path.join(output_dir, f"{dataset}.{query_type}.{EMBEDDING_PROVIDER}.ranking.tsv")
     write_rankings(results, output_file)
 
     print(f"Rankings written to {output_file}")
