@@ -17,35 +17,31 @@ from .db import BenchDB
 
 LOTTE_DATA_PATH = os.path.expanduser("~/datasets/lotte")
 
-def load_dataset(dataset: str, split: str) -> Tuple[Dict, Dict, Dict]:
-    print(f"Loading dataset {dataset} ({split} split)...")
+def load_corpus(dataset: str, split: str) -> Dict:
+    print(f"Loading corpus for dataset {dataset} ({split} split)...")
     data_path = os.path.join(LOTTE_DATA_PATH, dataset, split)
     
-    # Load collection
     corpus = {}
     with open(os.path.join(data_path, "collection.tsv"), "r") as f:
         for line in f:
             pid, text = line.strip().split("\t")
             corpus[pid] = {"text": text}
 
-    # Load queries and qrels for both search and forum
+    print(f"Corpus loaded. Size: {len(corpus)}")
+    return corpus
+
+def load_queries(dataset: str, split: str, query_type: str) -> Dict:
+    print(f"Loading {query_type} queries for dataset {dataset} ({split} split)...")
+    data_path = os.path.join(LOTTE_DATA_PATH, dataset, split)
+    
     queries = {}
-    qrels = defaultdict(dict)
-    for query_type in ["search", "forum"]:
-        with open(os.path.join(data_path, f"questions.{query_type}.tsv"), "r") as f:
-            for line in f:
-                qid, text = line.strip().split("\t")
-                queries[f"{query_type}_{qid}"] = text
+    with open(os.path.join(data_path, f"questions.{query_type}.tsv"), "r") as f:
+        for line in f:
+            qid, text = line.strip().split("\t")
+            queries[f"{query_type}_{qid}"] = text
 
-        with open(os.path.join(data_path, f"qas.{query_type}.jsonl"), "r") as f:
-            for line in f:
-                data = json.loads(line)
-                qid = f"{query_type}_{data['qid']}"
-                for pid in data['answer_pids']:
-                    qrels[qid][pid] = 1
-
-    print(f"Dataset loaded. Corpus size: {len(corpus)}, Queries: {len(queries)}, Relevance judgments: {len(qrels)}")
-    return corpus, queries, qrels
+    print(f"Queries loaded. Count: {len(queries)}")
+    return queries
 
 def process_document_batch(batch: List[Tuple[str, Dict]], db, colbert_live):
     chunk_raw_data = []
@@ -122,15 +118,15 @@ def evaluate_lotte(dataset: str, split: str, query_type: str):
     db = BenchDB(ks_name, model.dim, os.environ.get('ASTRA_DB_ID'), os.environ.get('ASTRA_DB_TOKEN'))
     colbert_live = ColbertLive(db, model, doc_pool_factor=doc_pool)
 
-    corpus, all_queries, all_qrels = load_dataset(dataset, split)
+    corpus = load_corpus(dataset, split)
     compute_and_store_embeddings(corpus, db, colbert_live)
 
-    queries = {qid: query for qid, query in all_queries.items() if qid.startswith(f"{query_type}_")}
+    queries = load_queries(dataset, split, query_type)
 
     print(f"Evaluating {dataset} ({query_type} queries) @ {tokens_per_query} TPQ")
     results = search_and_benchmark(queries, n_ann_docs, n_maxsim_candidates, colbert_live)
 
-    output_dir = f"lotte_rankings/{split}]/colbert"
+    output_dir = f"lotte_rankings/{split}/colbert"
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, f"{dataset}.{query_type}.ranking.tsv")
     write_rankings(results, output_file)
