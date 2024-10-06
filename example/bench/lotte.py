@@ -17,18 +17,21 @@ from .db import BenchDB
 
 LOTTE_DATA_PATH = os.path.expanduser("~/datasets/lotte")
 
-def load_corpus(dataset: str, split: str) -> Dict:
+def load_corpus(dataset: str, split: str, batch_size: int = 32):
     print(f"Loading corpus for dataset {dataset} ({split} split)...")
     data_path = os.path.join(LOTTE_DATA_PATH, dataset, split)
     
-    corpus = {}
+    batch = []
     with open(os.path.join(data_path, "collection.tsv"), "r") as f:
         for line in f:
             pid, text = line.strip().split("\t")
-            corpus[pid] = {"text": text}
-
-    print(f"Corpus loaded. Size: {len(corpus)}")
-    return corpus
+            batch.append((pid, text))
+            if len(batch) == batch_size:
+                yield batch
+                batch = []
+    
+    if batch:  # Yield any remaining items
+        yield batch
 
 def load_queries(dataset: str, split: str, query_type: str) -> Dict:
     print(f"Loading {query_type} queries for dataset {dataset} ({split} split)...")
@@ -43,13 +46,12 @@ def load_queries(dataset: str, split: str, query_type: str) -> Dict:
     print(f"Queries loaded. Count: {len(queries)}")
     return queries
 
-def process_document_batch(batch: List[Tuple[str, Dict]], db, colbert_live):
+def process_document_batch(batch: List[Tuple[str, str]], db, colbert_live):
     chunk_raw_data = []
     chunk_texts = []
     insert_data = []
 
-    for chunk_id, chunk in batch:
-        content = chunk['text']
+    for chunk_id, content in batch:
         chunk_texts.append(content)
         chunk_raw_data.append((chunk_id, "", content))
     
@@ -65,7 +67,7 @@ def is_populated(db):
     result = db.session.execute(f"SELECT * FROM {db.keyspace}.chunks LIMIT 1")
     return result.one() is not None
 
-def compute_and_store_embeddings(corpus: dict, db, colbert_live):
+def compute_and_store_embeddings(corpus_generator, db, colbert_live):
     if is_populated(db):
         print("The chunks table is not empty. Skipping encoding and insertion.")
         return
@@ -73,16 +75,21 @@ def compute_and_store_embeddings(corpus: dict, db, colbert_live):
     print("Encoding and inserting documents...")
     start_time = time.time()
     
-    batch_size = 32
     insert_future = None
-    for doc_batch in tqdm(chunked(corpus.items(), batch_size), total=len(corpus)//batch_size + 1, desc="Encoding and inserting"):
+    total_docs = 0
+    for batch_num, doc_batch in tqdm(enumerate(corpus_generator, 1), desc="Encoding and inserting batches"):
         next_insert_future = process_document_batch(doc_batch, db, colbert_live)
         if insert_future:
             insert_future.result()
         insert_future = next_insert_future
+        total_docs += len(doc_batch)
+
+    if insert_future:
+        insert_future.result()
 
     end_time = time.time()
-    print(f"Encoding and insertion completed. Time taken: {end_time - start_time:.2f} seconds")
+    print(f"Encoding and insertion completed. Total batches: {batch_num}, Total documents: {total_docs}")
+    print(f"Time taken: {end_time - start_time:.2f} seconds")
 
 def search_and_benchmark(queries: dict, n_ann_docs: int, n_colbert_candidates: int, colbert_live: ColbertLive) -> Dict[str, Dict[str, float]]:
     def search(query_item: Tuple[str, str]) -> Tuple[str, Dict[str, float]]:
@@ -118,8 +125,8 @@ def evaluate_lotte(dataset: str, split: str, query_type: str):
     db = BenchDB(ks_name, model.dim, os.environ.get('ASTRA_DB_ID'), os.environ.get('ASTRA_DB_TOKEN'))
     colbert_live = ColbertLive(db, model, doc_pool_factor=doc_pool)
 
-    corpus = load_corpus(dataset, split)
-    compute_and_store_embeddings(corpus, db, colbert_live)
+    corpus_generator = load_corpus(dataset, split)
+    compute_and_store_embeddings(corpus_generator, db, colbert_live)
 
     queries = load_queries(dataset, split, query_type)
 
