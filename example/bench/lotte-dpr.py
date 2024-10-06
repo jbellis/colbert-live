@@ -9,6 +9,7 @@ from openai import OpenAI
 import google.generativeai as gemini
 import tiktoken
 from tqdm import tqdm
+from sentence_transformers import SentenceTransformer
 from more_itertools import chunked
 
 from cassandra.cluster import Cluster, Session
@@ -25,6 +26,7 @@ gemini.configure(api_key=(os.environ.get("GEMINI_API_KEY")))
 # Global variables to store the chosen embedding provider and vector size
 EMBEDDING_PROVIDER = None
 VECTOR_SIZE = None
+STELLA_MODEL = None
 
 truncated_passages = 0
 
@@ -73,7 +75,7 @@ class LotteDPRDB:
 
     def search(self, query_embedding: List[float], k: int) -> List[Tuple[str, float]]:
         rows = self.session.execute(self.search_stmt, (query_embedding, query_embedding, k))
-        return [(row.id, row.similarity) for row in rows]  # Convert distance to similarity
+        return [(row.id, row.similarity) for row in rows]
 
 def load_dataset(dataset: str, split: str) -> Tuple[Dict, Dict, Dict]:
     print(f"Loading dataset {dataset} ({split} split)...")
@@ -103,7 +105,7 @@ def load_dataset(dataset: str, split: str) -> Tuple[Dict, Dict, Dict]:
     print(f"Dataset loaded. Corpus size: {len(corpus)}, Queries: {len(queries)}, Relevance judgments: {len(qrels)}")
     return corpus, queries, qrels
 
-def get_embeddings(texts: List[str]) -> List[List[float]]:
+def get_embeddings(texts: List[str], is_query: bool = False) -> List[List[float]]:
     if EMBEDDING_PROVIDER == "openai":
         tiktoken_model = tiktoken.encoding_for_model('text-embedding-3-small')
         def tokenize(text: str) -> List[int]:
@@ -131,6 +133,14 @@ def get_embeddings(texts: List[str]) -> List[List[float]]:
         result = gemini.embed_content(model=model, content=texts)
         time.sleep(1.0) # crude rate limit
         return result['embedding']
+    elif EMBEDDING_PROVIDER == "stella":
+        global STELLA_MODEL
+        if STELLA_MODEL is None:
+            STELLA_MODEL = SentenceTransformer("dunzhang/stella_en_1.5B_v5", trust_remote_code=True).cuda()
+        if is_query:
+            return STELLA_MODEL.encode(texts, prompt_name="s2p_query").tolist()
+        else:
+            return STELLA_MODEL.encode(texts).tolist()
     else:
         raise ValueError(f"Invalid embedding provider: {EMBEDDING_PROVIDER}")
 
@@ -150,7 +160,7 @@ def compute_and_store_embeddings(corpus: Dict, db: LotteDPRDB):
     for doc_batch in tqdm(chunked(corpus.items(), batch_size), total=len(corpus)//batch_size + 1, desc="Processing"):
         doc_ids, doc_data = zip(*doc_batch)
         doc_texts = [data['text'] for data in doc_data]
-        embeddings = get_embeddings(doc_texts)
+        embeddings = get_embeddings(doc_texts, is_query=False)
         
         documents = list(zip(doc_ids, doc_texts, embeddings))
         if future:
@@ -163,7 +173,7 @@ def compute_and_store_embeddings(corpus: Dict, db: LotteDPRDB):
 def search_and_benchmark(queries: Dict, db: LotteDPRDB, k: int = 5) -> Dict[str, Dict[str, float]]:
     def search_batch(query_batch: List[Tuple[str, str]]) -> List[Tuple[str, Dict[str, float]]]:
         query_ids, query_texts = zip(*query_batch)
-        query_embeddings = get_embeddings(query_texts)
+        query_embeddings = get_embeddings(query_texts, is_query=True)
         
         results = []
         for query_id, query_embedding in zip(query_ids, query_embeddings):
@@ -214,7 +224,14 @@ def evaluate_lotte(dataset: str, split: str, query_type: str):
 def main(embedding_provider, datasets):
     global EMBEDDING_PROVIDER, VECTOR_SIZE, truncated_passages
     EMBEDDING_PROVIDER = embedding_provider
-    VECTOR_SIZE = 1536 if embedding_provider == "openai" else 768
+    if embedding_provider == "openai":
+        VECTOR_SIZE = 1536
+    elif embedding_provider == "gemini":
+        VECTOR_SIZE = 768
+    elif embedding_provider == "stella":
+        VECTOR_SIZE = 1024
+    else:
+        raise ValueError(f"Invalid embedding provider: {embedding_provider}")
     for dataset in datasets:
         truncated_passages = 0
         for query_type in ["search", "forum"]:
@@ -222,7 +239,7 @@ def main(embedding_provider, datasets):
         print(f"Truncated passages: {truncated_passages} in {dataset}")
 
 if __name__ == "__main__":
-    all_datasets = ["writing", "recreation", "science", "technology", "lifestyle"]
+    all_datasets = ["writing", "recreation", "lifestyle"]
 
     if len(sys.argv) < 2:
         print("Usage: python lotte-dpr.py <embedding_provider> [dataset1 dataset2 ...]")
@@ -230,8 +247,8 @@ if __name__ == "__main__":
         sys.exit(1)
 
     embedding_provider = sys.argv[1].lower()
-    if embedding_provider not in ["openai", "gemini"]:
-        print("Invalid embedding provider. Must be either 'openai' or 'gemini'")
+    if embedding_provider not in ["openai", "gemini", "stella"]:
+        print("Invalid embedding provider. Must be 'openai', 'gemini', or 'stella'")
         sys.exit(1)
 
     if len(sys.argv) > 2:
