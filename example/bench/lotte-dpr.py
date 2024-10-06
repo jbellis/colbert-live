@@ -199,7 +199,8 @@ def write_rankings(results: Dict[str, Dict[str, float]], output_file: str):
     with open(output_file, "w") as f:
         for qid, doc_scores in results.items():
             for rank, (pid, score) in enumerate(sorted(doc_scores.items(), key=lambda x: x[1], reverse=True), start=1):
-                f.write(f"{qid}\t{pid}\t{rank}\t{score}\n")
+                qid_bare = qid.split("_")[1]
+                f.write(f"{qid_bare}\t{pid}\t{rank}\t{score}\n")
 
 def evaluate_lotte(dataset: str, split: str, query_type: str):
     ks_name = f"lotte_{dataset.replace('-', '')}"
@@ -214,9 +215,9 @@ def evaluate_lotte(dataset: str, split: str, query_type: str):
     print(f"Evaluating {dataset} ({query_type} queries)")
     results = search_and_benchmark(queries, db)
 
-    output_dir = f"lotte_rankings/{split}"
+    output_dir = f"lotte_rankings/{split}]/{EMBEDDING_PROVIDER}"
     os.makedirs(output_dir, exist_ok=True)
-    output_file = os.path.join(output_dir, f"{dataset}.{query_type}.{EMBEDDING_PROVIDER}.ranking.tsv")
+    output_file = os.path.join(output_dir, f"{dataset}.{query_type}.ranking.tsv")
     write_rankings(results, output_file)
 
     print(f"Rankings written to {output_file}")

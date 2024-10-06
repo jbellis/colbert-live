@@ -106,7 +106,8 @@ def write_rankings(results: Dict[str, Dict[str, float]], output_file: str):
     with open(output_file, "w") as f:
         for qid, doc_scores in results.items():
             for rank, (pid, score) in enumerate(sorted(doc_scores.items(), key=lambda x: x[1], reverse=True), start=1):
-                f.write(f"{qid}\t{pid}\t{rank}\t{score}\n")
+                qid_bare = qid.split("_")[1]
+                f.write(f"{qid_bare}\t{pid}\t{rank}\t{score}\n")
 
 def evaluate_lotte(dataset: str, split: str, query_type: str):
     model_name = 'answerdotai/answerai-colbert-small-v1'
@@ -115,7 +116,7 @@ def evaluate_lotte(dataset: str, split: str, query_type: str):
     n_maxsim_candidates = 15
     tokens_per_query = 32
 
-    ks_name = f"lotte_{dataset.replace('-', '')}_{doc_pool}"
+    ks_name = f"lotte_{dataset.replace('-', '')}_colbert_{doc_pool}"
 
     model = ColbertModel(model_name, tokens_per_query=tokens_per_query)
     db = BenchDB(ks_name, model.dim, os.environ.get('ASTRA_DB_ID'), os.environ.get('ASTRA_DB_TOKEN'))
@@ -129,7 +130,7 @@ def evaluate_lotte(dataset: str, split: str, query_type: str):
     print(f"Evaluating {dataset} ({query_type} queries) @ {tokens_per_query} TPQ")
     results = search_and_benchmark(queries, n_ann_docs, n_maxsim_candidates, colbert_live)
 
-    output_dir = f"lotte_rankings/{split}"
+    output_dir = f"lotte_rankings/{split}]/colbert"
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, f"{dataset}.{query_type}.ranking.tsv")
     write_rankings(results, output_file)
