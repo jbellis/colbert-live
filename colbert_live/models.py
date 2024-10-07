@@ -42,7 +42,6 @@ class Model(ABC):
         """
         pass
 
-    @abstractmethod
     def score(self, Q: torch.Tensor, D_packed: torch.Tensor, D_lengths: torch.Tensor) -> torch.Tensor:
         """
         Calculate ColBERT scores for given query and document embeddings.
@@ -55,7 +54,19 @@ class Model(ABC):
         Returns:
             A tensor of ColBERT scores.
         """
-        pass
+        # Unpack D_packed into a list of tensors based on D_lengths
+        D = torch.split(D_packed, D_lengths.tolist())
+
+        Q = self.to_device(Q.unsqueeze(0))  # Add batch dimension and move to device
+        D = [self.to_device(d.to(Q.dtype)) for d in D]  # Move passage embeddings to device
+
+        # Pad the passage embeddings to the same length
+        D_padded = torch.nn.utils.rnn.pad_sequence(D, batch_first=True, padding_value=0)
+
+        # Compute scores using einsum
+        scores = torch.einsum("bnd,csd->bcns", Q, D_padded).max(dim=3)[0].sum(dim=2)
+
+        return scores.squeeze(0).to(torch.float32)  # Remove batch dimension and convert to float32
 
     @abstractmethod
     def to_device(self, T: torch.Tensor):
@@ -97,10 +108,6 @@ class ColbertModel(Model):
             embeddings_list.append(Di)
 
         return embeddings_list
-
-    def score(self, Q: torch.Tensor, D_packed: torch.Tensor, D_lengths: torch.Tensor) -> torch.Tensor:
-        # colbert_score_packed expects a 3D query tensor even though it only operates on a single query
-        return colbert_score_packed(Q.unsqueeze(0), D_packed, D_lengths, config=self.config)
 
     def to_device(self, T: torch.Tensor):
         return T.to(_get_module_device(self.checkpoint))
@@ -155,12 +162,6 @@ class ColpaliModel(Model):
 
         # Discard zero vectors from the embeddings tensor
         return [emb[emb.norm(dim=-1) > 0] for emb in raw_embeddings]
-
-    def score(self, Q: torch.Tensor, D_packed: torch.Tensor, D_lengths: torch.Tensor) -> torch.Tensor:
-        # Use colbert's scoring method because colbert-live operates in the float32 domain instead of bfloat16
-        # We don't pass a config object because the default is good enough for what we need
-        # (which is just reading total_visible_gpus to decide whether to call the C++ extension)
-        return colbert_score_packed(Q.unsqueeze(0), D_packed, D_lengths)
 
     def to_device(self, T: torch.Tensor):
         return T.to(_get_module_device(self.colpali))
