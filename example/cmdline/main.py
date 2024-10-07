@@ -55,7 +55,8 @@ def add_documents(db, colbert_live, filenames):
                 print(f"\nPage {i+1}:")
                 term_image = AutoImage(resized_image)
                 print(term_image)
-
+        total_embeddings = sum(len(embeddings) for embeddings in all_embeddings)
+        print(f'Inserting {total_embeddings} embeddings into the database...')
         doc_id = db.add_record(pngs, all_embeddings)
         print(f"Document '{filename}' {len(pngs)} pages added with ID {doc_id}")
 
