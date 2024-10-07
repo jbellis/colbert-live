@@ -130,20 +130,15 @@ class ColbertLive:
 
         return embeddings_list
 
-    def _load_data_and_construct_tensors(self, chunk_ids: list[Any]) -> tuple[torch.Tensor, torch.Tensor]:
+    def _load_data_and_construct_tensors(self, chunk_ids: list[Any]) -> list[torch.Tensor]:
         all_embeddings = []
-        lengths = []
 
         results = self.db.query_chunks(chunk_ids)
         for embeddings_for_chunk in results:
             packed_one_chunk = self.model.to_device(embeddings_for_chunk)
             all_embeddings.append(packed_one_chunk)
-            lengths.append(packed_one_chunk.shape[0])
 
-        D_packed = torch.cat(all_embeddings)
-        D_lengths = torch.tensor(lengths, dtype=torch.long)
-
-        return D_packed, D_lengths
+        return all_embeddings
 
     MAX_LIMIT = 1000
 
@@ -201,9 +196,9 @@ class ColbertLive:
             chunks[chunk_id] = chunks.get(chunk_id, 0) + similarity
         candidates = sorted(chunks, key=chunks.get, reverse=True)[:n_maxsim_candidates]
         # Load document encodings
-        D_packed, D_lengths = self._load_data_and_construct_tensors(candidates)
+        doc_encodings = self._load_data_and_construct_tensors(candidates)
         # Calculate full ColBERT scores
-        scores = self.model.score(query_encodings, D_packed, D_lengths)
+        scores = self.model.score(query_encodings, doc_encodings)
         # Map the scores back to chunk IDs and sort
         results = sorted(zip(candidates, scores), key=lambda x: x[1], reverse=True)
         # Convert tensor scores to Python floats and return top k results

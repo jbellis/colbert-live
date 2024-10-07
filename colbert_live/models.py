@@ -42,21 +42,17 @@ class Model(ABC):
         """
         pass
 
-    def score(self, Q: torch.Tensor, D_packed: torch.Tensor, D_lengths: torch.Tensor) -> torch.Tensor:
+    def score(self, Q: torch.Tensor, D: list[torch.Tensor]) -> torch.Tensor:
         """
         Calculate ColBERT scores for given query and document embeddings.
 
         Args:
             Q: 2D Query embeddings tensor.
-            D_packed: Packed document embeddings tensor.
-            D_lengths: Tensor of document lengths.
+            D: list of 2D document embeddings tensors.
 
         Returns:
             A tensor of ColBERT scores.
         """
-        # Unpack D_packed into a list of tensors based on D_lengths
-        D = torch.split(D_packed, D_lengths.tolist())
-
         Q = self.to_device(Q.unsqueeze(0))  # Add batch dimension and move to device
         D = [self.to_device(d.to(Q.dtype)) for d in D]  # Move passage embeddings to device
 
