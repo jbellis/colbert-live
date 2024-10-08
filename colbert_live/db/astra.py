@@ -104,12 +104,23 @@ class AstraCQL(DB):
     def __init__(self,
                  keyspace: str,
                  embedding_dim: int,
-                 astra_db_id: str | None,
-                 astra_token: str | None,
+                 astra_db_id: str | None = None,
+                 astra_token: str | None = None,
+                 astra_endpoint: str | None = None,
                  verbose: bool = False):
         self.verbose = verbose
         self.embedding_dim = embedding_dim
         self.keyspace = keyspace
+        
+        if astra_db_id and astra_endpoint:
+            raise ValueError("Both astra_db_id and astra_endpoint cannot be provided simultaneously.")
+        
+        if astra_endpoint:
+            import re
+            match = re.search(r'https://([0-9a-f-]{36})-', astra_endpoint)
+            if not match:
+                raise ValueError("Invalid astra_endpoint format. Expected UUID not found.")
+            astra_db_id = match.group(1)
         
         if not astra_token:
             if self.verbose: print('Connecting to local Cassandra')
