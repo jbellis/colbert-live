@@ -5,6 +5,7 @@ import urllib.error
 import urllib.request
 from concurrent.futures import Future
 from typing import Any
+import uuid
 
 import torch
 from cassandra.auth import PlainTextAuthProvider
@@ -121,6 +122,12 @@ class AstraCQL(DB):
             if not match:
                 raise ValueError("Invalid astra_endpoint format. Expected UUID not found.")
             astra_db_id = match.group(1)
+        
+        if astra_db_id:
+            try:
+                uuid.UUID(astra_db_id)
+            except ValueError:
+                raise ValueError(f"Invalid astra_db_id: {astra_db_id}. It must be a valid UUID.")
         
         if not astra_token:
             if self.verbose: print('Connecting to local Cassandra')
