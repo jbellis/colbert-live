@@ -2,6 +2,7 @@ import os
 import sys
 import time
 import json
+import argparse
 from concurrent.futures import ThreadPoolExecutor
 from itertools import cycle
 from typing import Dict, Tuple, List
@@ -67,8 +68,8 @@ def is_populated(db):
     result = db.session.execute(f"SELECT * FROM {db.keyspace}.chunks LIMIT 1")
     return result.one() is not None
 
-def compute_and_store_embeddings(corpus_generator, db, colbert_live):
-    if is_populated(db):
+def compute_and_store_embeddings(corpus_generator, db, colbert_live, start_ordinal=0):
+    if is_populated(db) and not start_ordinal:
         print("The chunks table is not empty. Skipping encoding and insertion.")
         return
 
@@ -78,6 +79,8 @@ def compute_and_store_embeddings(corpus_generator, db, colbert_live):
     insert_future = None
     total_docs = 0
     for batch_num, doc_batch in tqdm(enumerate(corpus_generator, 1), desc="Encoding and inserting batches"):
+        if (batch_num - 1) * len(doc_batch) < start_ordinal:
+            continue
         next_insert_future = process_document_batch(doc_batch, db, colbert_live)
         if insert_future:
             insert_future.result()
@@ -112,7 +115,7 @@ def write_rankings(results: Dict[str, Dict[str, float]], output_file: str):
                 qid_bare = qid.split("_")[1]
                 f.write(f"{qid_bare}\t{pid}\t{rank}\t{score}\n")
 
-def evaluate_lotte(dataset: str, split: str, query_type: str):
+def evaluate_lotte(dataset: str, split: str, query_type: str, start_ordinal: int = 0):
     model_name = 'answerdotai/answerai-colbert-small-v1'
     doc_pool = 2
     n_ann_docs = 240
@@ -126,7 +129,7 @@ def evaluate_lotte(dataset: str, split: str, query_type: str):
     colbert_live = ColbertLive(db, model, doc_pool_factor=doc_pool)
 
     corpus_generator = load_corpus(dataset, split)
-    compute_and_store_embeddings(corpus_generator, db, colbert_live)
+    compute_and_store_embeddings(corpus_generator, db, colbert_live, start_ordinal)
 
     queries = load_queries(dataset, split, query_type)
 
@@ -140,21 +143,24 @@ def evaluate_lotte(dataset: str, split: str, query_type: str):
 
     print(f"Rankings written to {output_file}")
 
-def main(datasets):
+def main(datasets, start_ordinal):
     for dataset in datasets:
         for query_type in ["search", "forum"]:
-            evaluate_lotte(dataset, "test", query_type)
+            evaluate_lotte(dataset, "test", query_type, start_ordinal)
 
 if __name__ == "__main__":
     all_datasets = ["writing", "recreation", "science", "technology", "lifestyle"]
 
-    if len(sys.argv) > 1:
-        datasets_to_run = [d for d in sys.argv[1:] if d in all_datasets]
-        unrecognized_datasets = [d for d in sys.argv[1:] if d not in all_datasets]
-        if unrecognized_datasets:
-            print(f"Skipping unrecognized datasets: {', '.join(unrecognized_datasets)}")
-    else:
-        datasets_to_run = all_datasets
+    parser = argparse.ArgumentParser(description="Evaluate LOTTE datasets")
+    parser.add_argument("datasets", nargs="*", choices=all_datasets, default=all_datasets,
+                        help="Datasets to evaluate (default: all)")
+    parser.add_argument("--start", type=int, default=0,
+                        help="Corpus ordinal to start from (default: 0)")
+    args = parser.parse_args()
+
+    datasets_to_run = args.datasets
+    start_ordinal = args.start
 
     print(f"Evaluating datasets: {', '.join(datasets_to_run)}")
-    main(datasets_to_run)
+    print(f"Starting from corpus ordinal: {start_ordinal}")
+    main(datasets_to_run, start_ordinal)
