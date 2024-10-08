@@ -215,7 +215,7 @@ def evaluate_lotte(dataset: str, split: str, query_type: str):
     print(f"Evaluating {dataset} ({query_type} queries)")
     results = search_and_benchmark(queries, db)
 
-    output_dir = f"lotte_rankings/{split}]/{EMBEDDING_PROVIDER}"
+    output_dir = f"lotte_rankings/{EMBEDDING_PROVIDER}/{split}"
     os.makedirs(output_dir, exist_ok=True)
     output_file = os.path.join(output_dir, f"{dataset}.{query_type}.ranking.tsv")
     write_rankings(results, output_file)
