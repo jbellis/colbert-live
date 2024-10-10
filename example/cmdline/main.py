@@ -28,7 +28,7 @@ def page_images_from(filename):
         )
         return [Image.open(image_path) for image_path in images]
 
-def add_documents(db, colbert_live, filenames):
+def add_documents(db, colbert_live, filenames, tags: set[str]):
     for filename in filenames:
         print(f"Extracting pages from '{filename}'...")
         page_images = page_images_from(filename)
@@ -57,12 +57,15 @@ def add_documents(db, colbert_live, filenames):
                 print(term_image)
         total_embeddings = sum(len(embeddings) for embeddings in all_embeddings)
         print(f'Inserting {total_embeddings} embeddings into the database...')
-        doc_id = db.add_record(pngs, all_embeddings)
+        doc_id = db.add_record(pngs, all_embeddings, tags)
         print(f"Document '{filename}' {len(pngs)} pages added with ID {doc_id}")
+        if tags:
+            print(f"  tags: {', '.join(tags)}")
 
 
-def search_documents(db, colbert_live, query, k=5):
-    results = colbert_live.search(query, k=k)
+def search_documents(db, colbert_live, query, k=5, tag=None):
+    params = {'tag': tag} if tag else {}
+    results = colbert_live.search(query, k=k, params=params)
     print("\nSearch results:")
     print("Score  Chunk  Title")
     for i, (chunk_pk, score) in enumerate(results[:3], 1):
@@ -80,10 +83,12 @@ def main():
 
     add_parser = subparsers.add_parser("add", help="Add new documents")
     add_parser.add_argument("filenames", nargs="+", help="Filenames of documents to add")
+    add_parser.add_argument("--tags", help="Comma-separated list of tags to add to the documents")
 
     search_parser = subparsers.add_parser("search", help="Search documents")
     search_parser.add_argument("query", help="Search query")
     search_parser.add_argument("--k", type=int, default=5, help="Number of results to return")
+    search_parser.add_argument("--tag", help="Single tag to filter the search results")
 
     args = parser.parse_args()
 
@@ -92,9 +97,10 @@ def main():
     colbert_live = ColbertLive(db, model)
 
     if args.command == "add":
-        add_documents(db, colbert_live, args.filenames)
+        tags = set(s.strip() for s in args.tags.split(',')) if args.tags else set()
+        add_documents(db, colbert_live, args.filenames, tags)
     elif args.command == "search":
-        search_documents(db, colbert_live, args.query, args.k)
+        search_documents(db, colbert_live, args.query, args.k, args.tag)
 
 
 if __name__ == "__main__":

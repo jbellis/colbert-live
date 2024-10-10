@@ -3,6 +3,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+from abc import abstractmethod
 from concurrent.futures import Future
 from typing import Any
 import uuid
@@ -14,11 +15,13 @@ from cassandra.cluster import EXEC_PROFILE_DEFAULT
 from cassandra.concurrent import ConcurrentExecutorListResults
 from cassandra.concurrent import execute_concurrent_with_args
 from cassandra.policies import ExponentialReconnectionPolicy
+from cassandra.query import PreparedStatement
 
 from .db import DB
 
 _model_dimensions = {'colbertv2.0': 128,
                      'answerai-colbert-small-v1': 96}
+
 
 def _get_astra_bundle_url(db_id, token):
     # set up the request
@@ -73,11 +76,11 @@ class AstraCQL(DB):
 
     Attributes:
         session: The database session object.
-        query_ann_stmt: The prepared statement for ANN queries.
-        query_chunks_stmt: The prepared statement for chunk queries.
 
     Subclasses must implement:
     - prepare: Set up necessary database statements and perform any required table manipulation.
+    - get_query_ann: Set up prepared statement and bind vars for ANN queries.
+    - get_query_chunks_stmt: Return prepared statement for chunk queries.
     - process_ann_rows: Process the results of the ANN query.
     - process_chunk_rows: Process the results of the chunk query.
     See the docstrings of these methods for details.
@@ -99,6 +102,13 @@ class AstraCQL(DB):
             def process_chunk_rows(self, result):
                 return [torch.tensor(row.embedding) for row in result]
 
+            def get_query_ann(self, embeddings, limit, params):
+                params_list = [(emb, emb, limit) for emb in embeddings.tolist()]
+                return self.query_ann_stmt, params_list
+
+            def get_query_chunks_stmt(self, chunk_ids):
+                return self.query_chunks_stmt
+
     Raises:
         Exception: If Astra credentials are incomplete or connection fails.
     """
@@ -112,23 +122,23 @@ class AstraCQL(DB):
         self.verbose = verbose
         self.embedding_dim = embedding_dim
         self.keyspace = keyspace
-        
+
         if astra_db_id and astra_endpoint:
             raise ValueError("Both astra_db_id and astra_endpoint cannot be provided simultaneously.")
-        
+
         if astra_endpoint:
             import re
             match = re.search(r'https://([0-9a-f-]{36})-', astra_endpoint)
             if not match:
                 raise ValueError("Invalid astra_endpoint format. Expected UUID not found.")
             astra_db_id = match.group(1)
-        
+
         if astra_db_id:
             try:
                 uuid.UUID(astra_db_id)
             except ValueError:
                 raise ValueError(f"Invalid astra_db_id: {astra_db_id}. It must be a valid UUID.")
-        
+
         if not astra_token:
             if self.verbose: print('Connecting to local Cassandra')
             self._connect_local()
@@ -142,13 +152,14 @@ class AstraCQL(DB):
         self._maybe_create_keyspace(astra_db_id, astra_token)
         self.prepare(embedding_dim)
 
+    @abstractmethod
     def prepare(self, embedding_dim: int):
         """
-        Prepare the database schema and query statements.  AstraCQL creates the keyspace if necessary;
+        Prepare the database schema and query statements. AstraCQL creates the keyspace if necessary;
         everything else is up to you.
 
         This method should be implemented by subclasses to set up the necessary
-        database structure and prepare statements for querying.
+        database structure and prepare any additional statements for querying.
 
         Args:
             embedding_dim (int): The dimension of the ColBERT embeddings.
@@ -156,32 +167,37 @@ class AstraCQL(DB):
         Expected implementations:
         1. Create required tables (if not exists)
         2. Create necessary indexes (if not exists)
-        3. Prepare two main statements:
-           a) query_ann_stmt: For approximate nearest neighbor search
-              - Parameters: [query_embedding, query_embedding, limit]
-              - Expected result: [(primary_key, similarity)]
-              Example:
-                SELECT pk, similarity_cosine(embedding, ?) AS similarity
-                FROM table
-                ORDER BY embedding ANN OF ?
-                LIMIT ?
-
-           b) query_chunks_stmt: For retrieving embeddings by primary key
-              - Parameters: [primary_key]
-              - Expected result: [embedding]
-              Example:
-                SELECT embedding
-                FROM table
-                WHERE pk = ?
+        3. Prepare any additional statements needed for your specific implementation
 
         Note:
+        - The query_ann_stmt and query_chunks_stmt are now abstract methods and should be implemented separately.
         - Ensure that compound primary keys are represented as tuples in the results.
-        - The results of these queries will be processed by process_ann_rows and process_chunk_rows, respectively.
         """
-        self.query_ann_stmt = None
-        self.query_chunks_stmt = None
-        raise NotImplementedError('Subclasses must implement prepare_statements')
 
+    @abstractmethod
+    def get_query_ann(self, embeddings: torch.Tensor, limit: int, params: dict[str, Any]) -> tuple[PreparedStatement, list[tuple]]:
+        """
+        Abstract method for setting up the ANN query.
+
+        Args:
+            embeddings: a 2D tensor of query embeddings to compare against.
+            limit: The maximum number of results to return for each embedding.
+            params: Additional parameters to pass to the query, if any.
+
+        Returns:
+            A prepared statement and a list of bind variables to pass to the query (one element per embedding).
+        """
+
+    @abstractmethod
+    def get_query_chunks_stmt(self) -> PreparedStatement:
+        """
+        Abstract method for the chunks query.
+
+        Returns:
+            A prepared statement for retrieving embeddings by primary key.
+        """
+
+    @abstractmethod
     def process_ann_rows(self, result: ResultSet) -> list[tuple[Any, float]]:
         """
         Process the result of the ANN query into a list of (primary_key, similarity) tuples.
@@ -199,8 +215,8 @@ class AstraCQL(DB):
         - The primary_key should match the structure used in your database schema.
         - For compound primary keys, return them as tuples, e.g., (doc_id, page_num).
         """
-        raise NotImplementedError('Subclasses must implement process_ann_rows')
 
+    @abstractmethod
     def process_chunk_rows(self, result: ResultSet) -> list[torch.Tensor]:
         """
         Process the result of the chunk query into a list of embedding tensors.
@@ -213,18 +229,14 @@ class AstraCQL(DB):
 
         Example implementation:
             return [torch.tensor(row.embedding) for row in result]
-
-        Note:
-        - Ensure that the returned tensors match the expected embedding dimension.
-        - If your database stores embeddings in a different format, convert them to torch.Tensor here.
         """
-        raise NotImplementedError('Subclasses must implement process_chunk_rows')
 
-    def query_ann(self, embeddings: torch.Tensor, limit: int) -> list[list[tuple[Any, float]]]:
+    # noinspection PyDefaultArgument
+    def query_ann(self, embeddings: torch.Tensor, limit: int, params: dict[str, Any] = {}) \
+            -> list[list[tuple[Any, float]]]:
         if self.verbose: print(f'Querying ANN with {len(embeddings)} embeddings')
-        embedding_list = embeddings.tolist()
-        params = [(emb, emb, limit) for emb in embedding_list]
-        results = execute_concurrent_with_args(self.session, self.query_ann_stmt, params)
+        stmt, params_list = self.get_query_ann(embeddings, limit, params)
+        results = execute_concurrent_with_args(self.session, stmt, params_list)
 
         ann_results = []
         for success, result in results:
@@ -234,12 +246,18 @@ class AstraCQL(DB):
 
         return ann_results
 
+    # noinspection PyDefaultArgument
     def query_chunks(self, chunk_ids: list[Any]) -> list[torch.Tensor]:
         if self.verbose: print(f'Loading embeddings from {len(chunk_ids)} chunks for full ColBERT scoring')
         transformed_pks = [pk if isinstance(pk, tuple) else (pk,) for pk in chunk_ids]
-        results = execute_concurrent_with_args(self.session, self.query_chunks_stmt, transformed_pks)
-        return [torch.stack(self.process_chunk_rows(result))
-                for success, result in results if success]
+        stmt = self.get_query_chunks_stmt()
+        results = execute_concurrent_with_args(self.session, stmt, transformed_pks)
+        chunk_results = []
+        for success, result in results:
+            if not success:
+                raise Exception('Failed to execute chunk query')
+            chunk_results.append(torch.stack(self.process_chunk_rows(result)))
+        return chunk_results
 
     def _connect_local(self):
         reconnection_policy = ExponentialReconnectionPolicy(base_delay=1, max_delay=60)
@@ -275,9 +293,9 @@ class AstraCQL(DB):
             data = json.dumps({
                 "name": self.keyspace
             }).encode('utf-8')
-            
+
             req = urllib.request.Request(url, method="POST", headers=headers, data=data)
-            
+
             try:
                 with urllib.request.urlopen(req) as response:
                     if response.status == 201:
@@ -288,7 +306,7 @@ class AstraCQL(DB):
                             try:
                                 self.session.execute(f"USE {self.keyspace}")
                                 break
-                            except Exception:
+                            except BaseException:
                                 time.sleep(0.1)
                         else:
                             raise Exception(f"Keyspace '{self.keyspace}' creation successful, but still unavailable after 10 seconds")
@@ -334,7 +352,7 @@ def execute_concurrent_async(
 
     Args:
         session: Cassandra session object.
-        statement_and_parameters: Iterable of (prepared CQL statement, bind parameters) tuples.
+        statements_and_parameters: Iterable of (prepared CQL statement, bind parameters) tuples.
         concurrency (int, optional): Number of concurrent operations. Default is 100.
         raise_on_first_error (bool, optional): If True, execution stops on the first error. Default is True.
         execution_profile (ExecutionProfile, optional): Execution profile to use. Default is EXEC_PROFILE_DEFAULT.

@@ -26,7 +26,7 @@ class InMemoryDB(DB):
     def encode_file(self, file_path: str):
         raise NotImplementedError()
 
-    def query_ann(self, embeddings: torch.Tensor, limit: int) -> list[list[tuple[Any, float]]]:
+    def query_ann(self, embeddings: torch.Tensor, limit: int, params: dict[str, Any] = {}) -> list[list[tuple[Any, float]]]:
         results = []
         for query_embedding in embeddings:
             similarities = []

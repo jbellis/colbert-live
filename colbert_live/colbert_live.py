@@ -61,7 +61,7 @@ class ColbertLive:
 
         Args:
             db: The database instance to use for querying and storing embeddings.
-            Model: The Model instance to use for encoding queries and documents.  ColbertModel and ColpaliModel
+            model: The Model instance to use for encoding queries and documents.  ColbertModel and ColpaliModel
             are the two implementations provided by colbert-live.
             doc_pool_factor (optional): The factor by which to pool document embeddings, as the number of embeddings per cluster.
                 `None` to disable.
@@ -142,11 +142,13 @@ class ColbertLive:
 
     MAX_LIMIT = 1000
 
+    # noinspection PyDefaultArgument
     def search(self,
                query: str,
                k: int = 10,
                n_ann_docs: Optional[int] = None,
-               n_maxsim_candidates: Optional[int] = None
+               n_maxsim_candidates: Optional[int] = None,
+               params: dict[str, Any] = {}
                ) -> list[tuple[Any, float]]:
         """
         Perform a ColBERT search and return the top chunk IDs with their scores.
@@ -157,6 +159,7 @@ class ColbertLive:
             n_ann_docs: The number of chunks to retrieve for each embedding in the initial ANN search.
             n_maxsim_candidates: The number of top candidates to consider for full ColBERT scoring
             after combine the results of the ANN searches.
+            params: Additional (non-vector) search parameters, if any.
 
             If n_ann_docs and/or n_colbert_candidates are not specified, a best guess will be derived
             from top_k.
@@ -169,9 +172,9 @@ class ColbertLive:
             list[tuple[Any, float]]: A list of tuples of (chunk_id, ColBERT score) for the top k chunks.
         """
         Q = self.encode_query(query)
-        return self._search(Q, k, n_ann_docs, n_maxsim_candidates)
+        return self._search(Q, k, n_ann_docs, n_maxsim_candidates, params)
 
-    def _search(self, query_encodings, k, n_ann_docs, n_maxsim_candidates):
+    def _search(self, query_encodings, k, n_ann_docs, n_maxsim_candidates, params):
         """
         Search with precomputed query embeddings.
         Exposed for vidore-benchmark, which wants to batch-compute query embeddings up front
@@ -184,7 +187,7 @@ class ColbertLive:
             n_maxsim_candidates = _expand(k, 8.82, 1.13, -0.00471)
         # compute the max score for each term for each doc
         chunks_per_query = {}
-        for n, rows in enumerate(self.db.query_ann(query_encodings, n_ann_docs)):
+        for n, rows in enumerate(self.db.query_ann(query_encodings, n_ann_docs, params)):
             for chunk_id, similarity in rows:
                 key = (chunk_id, n)
                 chunks_per_query[key] = max(chunks_per_query.get(key, -1), similarity)
