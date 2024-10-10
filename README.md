@@ -25,7 +25,7 @@ ColBERT Live! features
 
 - Efficient ColBERT search implementation
 - Support for live updates to the vector index
-- Abstraction layer for database backends, starting with [AstraDB](https://www.datastax.com/products/astra)
+- Abstraction layer for database backends, starting with [AstraDB](https://www.datastax.com/products/astra) and SQLite
 - State of the art ColBERT techniques including:
   - Answer.AI ColBERT model for higher relevance
   - Document embedding pooling for reduced storage requirements
@@ -43,18 +43,31 @@ pip install colbert-live
 
 - Subclass your database backend and implement the required methods for retrieving embeddings:
   ```
-  from colbert_live.db.astra import AstraCql
+  from colbert_live.db.astra import AstraCQL
+  # or
+  from colbert_live.db.sqlite import Sqlite3DB
+  ```
   
-  class MyDB(AstraCql):
+  ```
+  class MyDB(AstraCQL):
     ...
   
   db = MyDB()
   ```
-- Instantiate 
-  `model = colbert_live.models.ColbertModel()` or
-  `model = colbert_live.models.ColpaliModel()`
-- Initialize `colbert = ColbertLive(db, model)`
-- Call `colbert.search(query_str, top_k)`
+- Instantiate:
+  ```
+  model = colbert_live.models.ColbertModel() 
+  # or
+  model = colbert_live.models.ColpaliModel()
+  ```
+- Initialize the ColbertLive instance:
+  ```
+  colbert = ColbertLive(db, model)
+  ```
+- Call `search`: 
+  ```
+  colbert.search(query_str, top_k)
+  ```
 
 Two cheat sheets are available:
 - Using ColBERT Live! with Astra:
@@ -66,7 +79,7 @@ Two cheat sheets are available:
 
 ## Supported databases
 
-ColBERT Live! initially supports [DataStax Astra](https://www.datastax.com/products/astra) out of the box.
+ColBERT Live! initially supports [DataStax Astra](https://www.datastax.com/products/astra) and SQLiteout of the box.
 Adding support for other databases is straightforward; check out 
 [the Astra implementation](https://github.com/jbellis/colbert-live/blob/master/colbert_live/db/astra.py) 
 for an example to follow.  If you're not concerned about making it reusable, you just have to implement

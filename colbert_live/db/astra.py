@@ -249,9 +249,9 @@ class AstraCQL(DB):
     # noinspection PyDefaultArgument
     def query_chunks(self, chunk_ids: list[Any]) -> list[torch.Tensor]:
         if self.verbose: print(f'Loading embeddings from {len(chunk_ids)} chunks for full ColBERT scoring')
-        transformed_pks = [pk if isinstance(pk, tuple) else (pk,) for pk in chunk_ids]
+        flattened_pks = [pk if isinstance(pk, tuple) else (pk,) for pk in chunk_ids]
         stmt = self.get_query_chunks_stmt()
-        results = execute_concurrent_with_args(self.session, stmt, transformed_pks)
+        results = execute_concurrent_with_args(self.session, stmt, flattened_pks)
         chunk_results = []
         for success, result in results:
             if not success:

@@ -10,7 +10,7 @@ from term_image.image import AutoImage
 
 from colbert_live.colbert_live import ColbertLive
 from colbert_live.models import Model, ColpaliModel
-from .db import CmdlineDB
+from .db import CmdlineAstraDB, CmdlineSqlite3DB
 
 
 def page_images_from(filename):
@@ -28,7 +28,7 @@ def page_images_from(filename):
         )
         return [Image.open(image_path) for image_path in images]
 
-def add_documents(db, colbert_live, filenames, tags: set[str]):
+def add_documents(db, colbert_live, filenames, tags: set[str], db_type: str):
     for filename in filenames:
         print(f"Extracting pages from '{filename}'...")
         page_images = page_images_from(filename)
@@ -57,9 +57,12 @@ def add_documents(db, colbert_live, filenames, tags: set[str]):
                 print(term_image)
         total_embeddings = sum(len(embeddings) for embeddings in all_embeddings)
         print(f'Inserting {total_embeddings} embeddings into the database...')
-        doc_id = db.add_record(pngs, all_embeddings, tags)
+        if db_type == 'astra':
+            doc_id = db.add_record(pngs, all_embeddings, tags)
+        else:
+            doc_id = db.add_record(pngs, all_embeddings)
         print(f"Document '{filename}' {len(pngs)} pages added with ID {doc_id}")
-        if tags:
+        if db_type == 'astra' and tags:
             print(f"  tags: {', '.join(tags)}")
 
 
@@ -79,6 +82,7 @@ def search_documents(db, colbert_live, query, k=5, tag=None):
 
 def main():
     parser = argparse.ArgumentParser(description="Colbert Live Demo")
+    parser.add_argument("--db", choices=["astra", "sqlite3"], default="astra", help="Database type to use")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     add_parser = subparsers.add_parser("add", help="Add new documents")
@@ -93,13 +97,24 @@ def main():
     args = parser.parse_args()
 
     model = ColpaliModel()
-    db = CmdlineDB('colpali', model.dim, os.getenv("ASTRA_DB_ID"), os.getenv("ASTRA_DB_TOKEN"))
+    
+    if args.db == "astra":
+        db = CmdlineAstraDB('colpali', model.dim, os.getenv("ASTRA_DB_ID"), os.getenv("ASTRA_DB_TOKEN"))
+    else:
+        db = CmdlineSqlite3DB('colpali.db', model.dim)
+    
     colbert_live = ColbertLive(db, model)
 
     if args.command == "add":
+        if args.db == "sqlite3" and args.tags:
+            print("Error: Tags are not supported with SQLite3 database.")
+            return
         tags = set(s.strip() for s in args.tags.split(',')) if args.tags else set()
-        add_documents(db, colbert_live, args.filenames, tags)
+        add_documents(db, colbert_live, args.filenames, tags, args.db)
     elif args.command == "search":
+        if args.db == "sqlite3" and args.tag:
+            print("Error: Tag filtering is not supported with SQLite3 database.")
+            return
         search_documents(db, colbert_live, args.query, args.k, args.tag)
 
 

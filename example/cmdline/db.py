@@ -1,5 +1,5 @@
 import uuid
-from typing import List, Any
+from typing import List, Any, Tuple
 
 import torch
 from cassandra.concurrent import execute_concurrent_with_args
@@ -8,8 +8,12 @@ from cassandra.query import PreparedStatement
 from colbert_live.db.astra import AstraCQL
 from cassandra.cluster import ResultSet
 
+from colbert_live.db.sqlite import Sqlite3DB
+import sqlite3
+import numpy as np
 
-class CmdlineDB(AstraCQL):
+
+class CmdlineAstraDB(AstraCQL):
     def __init__(self, keyspace: str, embedding_dim: int, astra_db_id: str, astra_token: str):
         super().__init__(keyspace, embedding_dim, astra_db_id, astra_token, verbose=True)
 
@@ -123,3 +127,100 @@ class CmdlineDB(AstraCQL):
         query = f"SELECT body FROM {self.keyspace}.pages WHERE record_id = %s AND num = %s"
         result = self.session.execute(query, (record_id, page_num))
         return result.one()[0]
+
+
+class CmdlineSqlite3DB(Sqlite3DB):
+    def __init__(self, db_path: str, embedding_dim: int):
+        super().__init__(db_path, embedding_dim, verbose=True)
+
+    def prepare(self, embedding_dim: int):
+        self.cursor.executescript(f"""
+            CREATE TABLE IF NOT EXISTS pages (
+                record_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                num INTEGER,
+                body BLOB,
+                UNIQUE (record_id, num)
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS page_embedding_vectors USING vec0(
+                embedding FLOAT[{embedding_dim}]
+            );
+
+            CREATE TABLE IF NOT EXISTS page_embeddings (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                record_id INTEGER,
+                page_num INTEGER,
+                embedding_id INTEGER,
+                page_embedding_vector_rowid INTEGER,
+                FOREIGN KEY (record_id, page_num) REFERENCES pages(record_id, num),
+                FOREIGN KEY (page_embedding_vector_rowid) REFERENCES page_embedding_vectors(rowid)
+            );
+        """)
+
+        # insert statements
+        self.insert_page_stmt = "INSERT INTO pages (num, body) VALUES (?, ?) RETURNING record_id"
+        self.insert_embedding_stmt = """
+            INSERT INTO page_embeddings (record_id, page_num, embedding_id, page_embedding_vector_rowid)
+            VALUES (?, ?, ?, ?)
+        """
+        self.insert_embedding_vector_stmt = "INSERT INTO page_embedding_vectors (embedding) VALUES (vec_f32(?))"
+
+        # queries
+        self.query_ann_stmt = f"""
+            SELECT record_id, page_num, distance
+            FROM (
+                SELECT rowid, distance
+                FROM page_embedding_vectors
+                WHERE embedding MATCH ?
+                ORDER BY distance
+                LIMIT ?
+            ) AS pev
+            JOIN page_embeddings pe ON pe.page_embedding_vector_rowid = pev.rowid
+        """
+        self.query_chunks_stmt = """
+            SELECT pev.embedding
+            FROM page_embeddings pe
+            JOIN page_embedding_vectors pev ON pe.page_embedding_vector_rowid = pev.rowid
+            WHERE pe.record_id = ? AND pe.page_num = ?
+        """
+
+        print("Schema ready")
+
+    def add_record(self, pages: list[bytes], embeddings: list[torch.Tensor]) -> int:
+        assert pages
+        for page_num, (page, page_embeddings) in enumerate(zip(pages, embeddings), start=1):
+            # Insert page
+            self.cursor.execute(self.insert_page_stmt, (page_num, page))
+            record_id = self.cursor.fetchone()[0]
+
+            # Insert embeddings for this page
+            for embedding_id, embedding in enumerate(page_embeddings):
+                # Insert the embedding vector
+                self.cursor.execute(self.insert_embedding_vector_stmt, (embedding.cpu().numpy().tobytes(),))
+                embedding_vector_rowid = self.cursor.lastrowid
+
+                # Insert the embedding metadata
+                self.cursor.execute(self.insert_embedding_stmt, 
+                    (record_id, page_num, embedding_id, embedding_vector_rowid))
+
+        self.conn.commit()
+        return record_id
+
+    def get_query_ann(self, embeddings: torch.Tensor, limit: int, params: dict[str, Any]) -> Tuple[str, List[Any]]:
+        params_list = [(emb.cpu().numpy().tobytes(), limit) for emb in embeddings]
+        return self.query_ann_stmt, params_list
+
+    def get_query_chunks_stmt(self) -> str:
+        return self.query_chunks_stmt
+
+    def process_ann_rows(self, result: List[sqlite3.Row]) -> List[Tuple[Any, float]]:
+        return [((row[0], row[1]), row[2]) for row in result]
+
+    def process_chunk_rows(self, result: List[sqlite3.Row]) -> List[torch.Tensor]:
+        return [torch.from_numpy(np.frombuffer(row[0], dtype=np.float32)) for row in result]
+
+    def get_page_body(self, chunk_pk: tuple) -> bytes:
+        record_id, page_num = chunk_pk
+        self.cursor.execute("SELECT body FROM pages WHERE record_id = ? AND num = ?", (record_id, page_num))
+        result = self.cursor.fetchone()
+        return result[0]
