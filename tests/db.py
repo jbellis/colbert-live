@@ -1,12 +1,14 @@
 import os
-import io
 from itertools import cycle
 from typing import Any
+
 import torch
 import torch.nn.functional as F
 from PIL import Image
+
 from colbert_live.db import DB
 from colbert_live.models import Model
+
 
 class InMemoryDB(DB):
     def __init__(self, model: Model, filetype: str):

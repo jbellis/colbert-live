@@ -6,7 +6,7 @@ import torch
 
 class DB(ABC):
     @abstractmethod
-    def query_ann(self, embeddings: torch.Tensor, limit: int) -> list[list[tuple[Any, float]]]:
+    def query_ann(self, embeddings: torch.Tensor, limit: int, params: dict[str, Any] = {}) -> list[list[tuple[Any, float]]]:
         """
         Perform an approximate nearest neighbor (ANN) search of the ColBERT embeddings.
         This informs the decision of which documents to fetch for full ColBERT scoring.
@@ -14,6 +14,7 @@ class DB(ABC):
         Args:
             embeddings: A 2D tensor of ColBERT embeddings to compare against.
             limit: The maximum number of results to return for each embedding.
+            params: Additional parameters to pass to the query, if any.
 
         Returns:
             A list of lists, one per embedding, where each inner list contains tuples of (PK, similarity)

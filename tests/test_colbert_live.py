@@ -2,7 +2,8 @@ import pytest
 
 from colbert_live import ColbertLive
 from colbert_live.models import ColpaliModel, ColbertModel
-from .db import InMemoryDB, ColpaliTestDB, ColbertTestDB  # Use absolute import here
+from .db import ColpaliTestDB, ColbertTestDB  # Use absolute import here
+
 
 @pytest.mark.parametrize("model_name", [
     'vidore/colqwen2-v0.1',
