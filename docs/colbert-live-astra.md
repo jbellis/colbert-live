@@ -13,7 +13,7 @@ Initialize the ColbertLive instance.
 **Arguments:**
 
 - `db`: The database instance to use for querying and storing embeddings.
-- `Model`: The Model instance to use for encoding queries and documents.  ColbertModel and ColpaliModel
+- `model`: The Model instance to use for encoding queries and documents.  ColbertModel and ColpaliModel
   are the two implementations provided by colbert-live.
 - `doc_pool_factor (optional)`: The factor by which to pool document embeddings, as the number of embeddings per cluster.
   `None` to disable.
@@ -63,7 +63,7 @@ but also exposed here as a public method.
 
   A 2D tensor of query embeddings.
 
-#### `search(self, query: str, k: int = 10, n_ann_docs: Optional[int] = None, n_maxsim_candidates: Optional[int] = None) -> list[tuple[typing.Any, float]]`
+#### `search(self, query: str, k: int = 10, n_ann_docs: Optional[int] = None, n_maxsim_candidates: Optional[int] = None, params: dict[str, typing.Any] = {}) -> list[tuple[typing.Any, float]]`
 
 Perform a ColBERT search and return the top chunk IDs with their scores.
 
@@ -75,6 +75,7 @@ Perform a ColBERT search and return the top chunk IDs with their scores.
 - `n_ann_docs`: The number of chunks to retrieve for each embedding in the initial ANN search.
 - `n_maxsim_candidates`: The number of top candidates to consider for full ColBERT scoring
   after combine the results of the ANN searches.
+- `params`: Additional (non-vector) search parameters, if any.
   
   If n_ann_docs and/or n_colbert_candidates are not specified, a best guess will be derived
   from top_k.
@@ -105,7 +106,7 @@ from term_image.image import AutoImage
 
 from colbert_live.colbert_live import ColbertLive
 from colbert_live.models import Model, ColpaliModel
-from .db import CmdlineDB
+from .db import CmdlineAstraDB, CmdlineSqlite3DB
 
 
 def page_images_from(filename):
@@ -123,7 +124,7 @@ def page_images_from(filename):
         )
         return [Image.open(image_path) for image_path in images]
 
-def add_documents(db, colbert_live, filenames):
+def add_documents(db, colbert_live, filenames, tags: set[str], db_type: str):
     for filename in filenames:
         print(f"Extracting pages from '{filename}'...")
         page_images = page_images_from(filename)
@@ -150,13 +151,20 @@ def add_documents(db, colbert_live, filenames):
                 print(f"\nPage {i+1}:")
                 term_image = AutoImage(resized_image)
                 print(term_image)
-
-        doc_id = db.add_record(pngs, all_embeddings)
+        total_embeddings = sum(len(embeddings) for embeddings in all_embeddings)
+        print(f'Inserting {total_embeddings} embeddings into the database...')
+        if db_type == 'astra':
+            doc_id = db.add_record(pngs, all_embeddings, tags)
+        else:
+            doc_id = db.add_record(pngs, all_embeddings)
         print(f"Document '{filename}' {len(pngs)} pages added with ID {doc_id}")
+        if db_type == 'astra' and tags:
+            print(f"  tags: {', '.join(tags)}")
 
 
-def search_documents(db, colbert_live, query, k=5):
-    results = colbert_live.search(query, k=k)
+def search_documents(db, colbert_live, query, k=5, tag=None):
+    params = {'tag': tag} if tag else {}
+    results = colbert_live.search(query, k=k, params=params)
     print("\nSearch results:")
     print("Score  Chunk  Title")
     for i, (chunk_pk, score) in enumerate(results[:3], 1):
@@ -170,25 +178,40 @@ def search_documents(db, colbert_live, query, k=5):
 
 def main():
     parser = argparse.ArgumentParser(description="Colbert Live Demo")
+    parser.add_argument("--db", choices=["astra", "sqlite3"], default="astra", help="Database type to use")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     add_parser = subparsers.add_parser("add", help="Add new documents")
     add_parser.add_argument("filenames", nargs="+", help="Filenames of documents to add")
+    add_parser.add_argument("--tags", help="Comma-separated list of tags to add to the documents")
 
     search_parser = subparsers.add_parser("search", help="Search documents")
     search_parser.add_argument("query", help="Search query")
     search_parser.add_argument("--k", type=int, default=5, help="Number of results to return")
+    search_parser.add_argument("--tag", help="Single tag to filter the search results")
 
     args = parser.parse_args()
 
     model = ColpaliModel()
-    db = CmdlineDB('colpali', model.dim, os.getenv("ASTRA_DB_ID"), os.getenv("ASTRA_DB_TOKEN"))
+    
+    if args.db == "astra":
+        db = CmdlineAstraDB('colpali', model.dim, os.getenv("ASTRA_DB_ID"), os.getenv("ASTRA_DB_TOKEN"))
+    else:
+        db = CmdlineSqlite3DB('colpali.db', model.dim)
+    
     colbert_live = ColbertLive(db, model)
 
     if args.command == "add":
-        add_documents(db, colbert_live, args.filenames)
+        if args.db == "sqlite3" and args.tags:
+            print("Error: Tags are not supported with SQLite3 database.")
+            return
+        tags = set(s.strip() for s in args.tags.split(',')) if args.tags else set()
+        add_documents(db, colbert_live, args.filenames, tags, args.db)
     elif args.command == "search":
-        search_documents(db, colbert_live, args.query, args.k)
+        if args.db == "sqlite3" and args.tag:
+            print("Error: Tag filtering is not supported with SQLite3 database.")
+            return
+        search_documents(db, colbert_live, args.query, args.k, args.tag)
 
 
 if __name__ == "__main__":
@@ -217,11 +240,11 @@ to customize the behavior for their specific use case.
   
 - `Attributes`: 
 - `session`: The database session object.
-- `query_ann_stmt`: The prepared statement for ANN queries.
-- `query_chunks_stmt`: The prepared statement for chunk queries.
   
 - `Subclasses must implement`: 
 - `- prepare`: Set up necessary database statements and perform any required table manipulation.
+- `- get_query_ann`: Set up prepared statement and bind vars for ANN queries.
+- `- get_query_chunks_stmt`: Return prepared statement for chunk queries.
 - `- process_ann_rows`: Process the results of the ANN query.
 - `- process_chunk_rows`: Process the results of the chunk query.
   See the docstrings of these methods for details.
@@ -243,22 +266,54 @@ to customize the behavior for their specific use case.
 - `def process_chunk_rows(self, result)`: 
   return [torch.tensor(row.embedding) for row in result]
   
+- `def get_query_ann(self, embeddings, limit, params)`: 
+  params_list = [(emb, emb, limit) for emb in embeddings.tolist()]
+  return self.query_ann_stmt, params_list
+  
+- `def get_query_chunks_stmt(self, chunk_ids)`: 
+  return self.query_chunks_stmt
+  
 - `Raises`: 
 - `Exception`: If Astra credentials are incomplete or connection fails.
 
 ### Constructor
 
-#### `__init__(self, keyspace: str, embedding_dim: int, astra_db_id: str | None, astra_token: str | None, verbose: bool = False)`
+#### `__init__(self, keyspace: str, embedding_dim: int, astra_db_id: str | None = None, astra_token: str | None = None, astra_endpoint: str | None = None, verbose: bool = False)`
 
 ### Methods
 
+#### `get_query_ann(self, embeddings: torch.Tensor, limit: int, params: dict[str, typing.Any]) -> tuple[cassandra.query.PreparedStatement, list[tuple]]`
+
+Abstract method for setting up the ANN query.
+
+
+**Arguments:**
+
+- `embeddings`: a 2D tensor of query embeddings to compare against.
+- `limit`: The maximum number of results to return for each embedding.
+- `params`: Additional parameters to pass to the query, if any.
+  
+
+**Returns:**
+
+  A prepared statement and a list of bind variables to pass to the query (one element per embedding).
+
+#### `get_query_chunks_stmt(self) -> cassandra.query.PreparedStatement`
+
+Abstract method for the chunks query.
+
+
+**Returns:**
+
+  A prepared statement for retrieving embeddings by primary key.
+
 #### `prepare(self, embedding_dim: int)`
 
-Prepare the database schema and query statements.  AstraCQL creates the keyspace if necessary;
+Prepare the database schema and query statements. AstraCQL creates the keyspace if necessary;
 everything else is up to you.
 
 This method should be implemented by subclasses to set up the necessary
-database structure and prepare statements for querying.
+database structure and prepare any additional statements for querying.
 
 
 **Arguments:**
@@ -268,27 +323,11 @@ database structure and prepare statements for querying.
 - `Expected implementations`: 
   1. Create required tables (if not exists)
   2. Create necessary indexes (if not exists)
-- `3. Prepare two main statements`: 
-- `a) query_ann_stmt`: For approximate nearest neighbor search
-- `- Parameters`: [query_embedding, query_embedding, limit]
-- `- Expected result`: [(primary_key, similarity)]
-- `Example`: 
-  SELECT pk, similarity_cosine(embedding, ?) AS similarity
-  FROM table
-  ORDER BY embedding ANN OF ?
-  LIMIT ?
-  
-- `b) query_chunks_stmt`: For retrieving embeddings by primary key
-- `- Parameters`: [primary_key]
-- `- Expected result`: [embedding]
-- `Example`: 
-  SELECT embedding
-  FROM table
-  WHERE pk = ?
+  3. Prepare any additional statements needed for your specific implementation
   
 - `Note`: 
+  - The query_ann_stmt and query_chunks_stmt are now abstract methods and should be implemented separately.
   - Ensure that compound primary keys are represented as tuples in the results.
-  - The results of these queries will be processed by process_ann_rows and process_chunk_rows, respectively.
 
 #### `process_ann_rows(self, result: cassandra.cluster.ResultSet) -> list[tuple[typing.Any, float]]`
 
@@ -330,11 +369,7 @@ Process the result of the chunk query into a list of embedding tensors.
 Example implementation:
 return [torch.tensor(row.embedding) for row in result]
 
-Note:
-- Ensure that the returned tensors match the expected embedding dimension.
-- If your database stores embeddings in a different format, convert them to torch.Tensor here.
-
-#### `query_ann(self, embeddings: torch.Tensor, limit: int) -> list[list[tuple[typing.Any, float]]]`
+#### `query_ann(self, embeddings: torch.Tensor, limit: int, params: dict[str, typing.Any] = {}) -> list[list[tuple[typing.Any, float]]]`
 
 #### `query_chunks(self, chunk_ids: list[typing.Any]) -> list[torch.Tensor]`
 
@@ -345,16 +380,21 @@ Note:
 ## Example of subclassing AstraCQL
 ```
 import uuid
-from typing import List, Any
+from typing import List, Any, Tuple
 
 import torch
 from cassandra.concurrent import execute_concurrent_with_args
+from cassandra.query import PreparedStatement
 
 from colbert_live.db.astra import AstraCQL
 from cassandra.cluster import ResultSet
 
+from colbert_live.db.sqlite import Sqlite3DB
+import sqlite3
+import numpy as np
 
-class CmdlineDB(AstraCQL):
+
+class CmdlineAstraDB(AstraCQL):
     def __init__(self, keyspace: str, embedding_dim: int, astra_db_id: str, astra_token: str):
         super().__init__(keyspace, embedding_dim, astra_db_id, astra_token, verbose=True)
 
@@ -362,10 +402,10 @@ class CmdlineDB(AstraCQL):
         # Create tables asynchronously
         futures = []
 
-        # for simplicity we don't actually have a records table, but if we
+        # for simplicity, we don't actually have a records table, but if we
         # wanted to add things like title, creation date, etc., that's where it would go
 
-        # Create chunks table
+        # Create pages table
         futures.append(self.session.execute_async(f"""
             CREATE TABLE IF NOT EXISTS {self.keyspace}.pages (
                 record_id uuid,
@@ -381,6 +421,7 @@ class CmdlineDB(AstraCQL):
                 record_id uuid,
                 page_num int,
                 embedding_id int,
+                tags set<text>,
                 embedding vector<float, {embedding_dim}>,
                 PRIMARY KEY (record_id, page_num, embedding_id)
             )
@@ -391,25 +432,38 @@ class CmdlineDB(AstraCQL):
             future.result()
 
         # Create colbert_ann index
-        index_future = self.session.execute_async(f"""
+        i1 = self.session.execute_async(f"""
             CREATE CUSTOM INDEX IF NOT EXISTS colbert_ann 
             ON {self.keyspace}.page_embeddings(embedding) 
             USING 'StorageAttachedIndex'
             WITH OPTIONS = {{ 'source_model': 'bert' }}
         """)
+        i2 = self.session.execute_async(f"""
+            CREATE CUSTOM INDEX IF NOT EXISTS colbert_tags 
+            ON {self.keyspace}.page_embeddings(tags) 
+            USING 'StorageAttachedIndex'
+        """)
+        index_futures = [i1, i2]
 
         # Prepare statements
         self.insert_page_stmt = self.session.prepare(f"""
             INSERT INTO {self.keyspace}.pages (record_id, num, body) VALUES (?, ?, ?)
         """)
         self.insert_embedding_stmt = self.session.prepare(f"""
-            INSERT INTO {self.keyspace}.page_embeddings (record_id, page_num, embedding_id, embedding) VALUES (?, ?, ?, ?)
+            INSERT INTO {self.keyspace}.page_embeddings (record_id, page_num, embedding_id, embedding, tags) VALUES (?, ?, ?, ?, ?)
         """)
 
-        index_future.result()
+        [index_future.result() for index_future in index_futures]
         self.query_ann_stmt = self.session.prepare(f"""
             SELECT record_id, page_num, similarity_cosine(embedding, ?) AS similarity
             FROM {self.keyspace}.page_embeddings
+            ORDER BY embedding ANN OF ?
+            LIMIT ?
+        """)
+        self.query_ann_with_tag_stmt = self.session.prepare(f"""
+            SELECT record_id, page_num, similarity_cosine(embedding, ?) AS similarity
+            FROM {self.keyspace}.page_embeddings
+            WHERE tags CONTAINS ?
             ORDER BY embedding ANN OF ?
             LIMIT ?
         """)
@@ -419,17 +473,29 @@ class CmdlineDB(AstraCQL):
 
         print("Schema ready")
 
-    def add_record(self, pages: list[bytes], embeddings: list[torch.Tensor]):
+    def add_record(self, pages: list[bytes], embeddings: list[torch.Tensor], tags: set[str] = set()):
         record_id = uuid.uuid4()
         L = [(record_id, num, body) for num, body in enumerate(pages, start=1)]
         execute_concurrent_with_args(self.session, self.insert_page_stmt, L)
 
-        L = [(record_id, page_num, embedding_id, embedding)
+        L = [(record_id, page_num, embedding_id, embedding, tags)
              for page_num in range(1, len(embeddings) + 1)
              for embedding_id, embedding in enumerate(embeddings[page_num - 1])]
         execute_concurrent_with_args(self.session, self.insert_embedding_stmt, L)
 
         return record_id
+
+    def get_query_ann(self, embeddings: torch.Tensor, limit: int, params: dict[str, Any]) -> tuple[PreparedStatement, list[tuple]]:
+        tag = params.get('tag')
+        if tag:
+            params_list = [(emb, tag, emb, limit) for emb in embeddings.tolist()]
+            return self.query_ann_with_tag_stmt, params_list
+        else:
+            params_list = [(emb, emb, limit) for emb in embeddings.tolist()]
+            return self.query_ann_stmt, params_list
+
+    def get_query_chunks_stmt(self) -> PreparedStatement:
+        return self.query_chunks_stmt
 
     def process_ann_rows(self, result: ResultSet) -> List[tuple[Any, float]]:
         return [((row.record_id, row.page_num), row.similarity) for row in result]
@@ -442,5 +508,102 @@ class CmdlineDB(AstraCQL):
         query = f"SELECT body FROM {self.keyspace}.pages WHERE record_id = %s AND num = %s"
         result = self.session.execute(query, (record_id, page_num))
         return result.one()[0]
+
+
+class CmdlineSqlite3DB(Sqlite3DB):
+    def __init__(self, db_path: str, embedding_dim: int):
+        super().__init__(db_path, embedding_dim, verbose=True)
+
+    def prepare(self, embedding_dim: int):
+        self.cursor.executescript(f"""
+            CREATE TABLE IF NOT EXISTS pages (
+                record_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                num INTEGER,
+                body BLOB,
+                UNIQUE (record_id, num)
+            );
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS page_embedding_vectors USING vec0(
+                embedding FLOAT[{embedding_dim}]
+            );
+
+            CREATE TABLE IF NOT EXISTS page_embeddings (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                record_id INTEGER,
+                page_num INTEGER,
+                embedding_id INTEGER,
+                page_embedding_vector_rowid INTEGER,
+                FOREIGN KEY (record_id, page_num) REFERENCES pages(record_id, num),
+                FOREIGN KEY (page_embedding_vector_rowid) REFERENCES page_embedding_vectors(rowid)
+            );
+        """)
+
+        # insert statements
+        self.insert_page_stmt = "INSERT INTO pages (num, body) VALUES (?, ?) RETURNING record_id"
+        self.insert_embedding_stmt = """
+            INSERT INTO page_embeddings (record_id, page_num, embedding_id, page_embedding_vector_rowid)
+            VALUES (?, ?, ?, ?)
+        """
+        self.insert_embedding_vector_stmt = "INSERT INTO page_embedding_vectors (embedding) VALUES (vec_f32(?))"
+
+        # queries
+        self.query_ann_stmt = f"""
+            SELECT record_id, page_num, distance
+            FROM (
+                SELECT rowid, distance
+                FROM page_embedding_vectors
+                WHERE embedding MATCH ?
+                ORDER BY distance
+                LIMIT ?
+            ) AS pev
+            JOIN page_embeddings pe ON pe.page_embedding_vector_rowid = pev.rowid
+        """
+        self.query_chunks_stmt = """
+            SELECT pev.embedding
+            FROM page_embeddings pe
+            JOIN page_embedding_vectors pev ON pe.page_embedding_vector_rowid = pev.rowid
+            WHERE pe.record_id = ? AND pe.page_num = ?
+        """
+
+        print("Schema ready")
+
+    def add_record(self, pages: list[bytes], embeddings: list[torch.Tensor]) -> int:
+        assert pages
+        for page_num, (page, page_embeddings) in enumerate(zip(pages, embeddings), start=1):
+            # Insert page
+            self.cursor.execute(self.insert_page_stmt, (page_num, page))
+            record_id = self.cursor.fetchone()[0]
+
+            # Insert embeddings for this page
+            for embedding_id, embedding in enumerate(page_embeddings):
+                # Insert the embedding vector
+                self.cursor.execute(self.insert_embedding_vector_stmt, (embedding.cpu().numpy().tobytes(),))
+                embedding_vector_rowid = self.cursor.lastrowid
+
+                # Insert the embedding metadata
+                self.cursor.execute(self.insert_embedding_stmt, 
+                    (record_id, page_num, embedding_id, embedding_vector_rowid))
+
+        self.conn.commit()
+        return record_id
+
+    def get_query_ann(self, embeddings: torch.Tensor, limit: int, params: dict[str, Any]) -> Tuple[str, List[Any]]:
+        params_list = [(emb.cpu().numpy().tobytes(), limit) for emb in embeddings]
+        return self.query_ann_stmt, params_list
+
+    def get_query_chunks_stmt(self) -> str:
+        return self.query_chunks_stmt
+
+    def process_ann_rows(self, result: List[sqlite3.Row]) -> List[Tuple[Any, float]]:
+        return [((row[0], row[1]), row[2]) for row in result]
+
+    def process_chunk_rows(self, result: List[sqlite3.Row]) -> List[torch.Tensor]:
+        return [torch.from_numpy(np.frombuffer(row[0], dtype=np.float32)) for row in result]
+
+    def get_page_body(self, chunk_pk: tuple) -> bytes:
+        record_id, page_num = chunk_pk
+        self.cursor.execute("SELECT body FROM pages WHERE record_id = ? AND num = ?", (record_id, page_num))
+        result = self.cursor.fetchone()
+        return result[0]
 
 ```
