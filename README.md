@@ -1,6 +1,6 @@
 # ColBERT Live!
 
-ColBERT Live! implements efficient [ColBERT](https://github.com/stanford-futuredata/ColBERT) search on top of vector indexes that support live updates 
+ColBERT Live! implements efficient [ColBERT](https://github.com/stanford-futuredata/ColBERT) and [ColPali](https://github.com/illuin-tech/colpali) search on top of vector indexes that support live updates 
 (without rebuilding the entire index) as well as arbitrary predicates against other indexed fields.
 
 ## Background
@@ -79,7 +79,7 @@ Two cheat sheets are available:
 
 ## Supported databases
 
-ColBERT Live! initially supports [DataStax Astra](https://www.datastax.com/products/astra) and SQLiteout of the box.
+ColBERT Live! initially supports [DataStax Astra](https://www.datastax.com/products/astra) and SQLite out of the box.
 Adding support for other databases is straightforward; check out 
 [the Astra implementation](https://github.com/jbellis/colbert-live/blob/master/colbert_live/db/astra.py) 
 for an example to follow.  If you're not concerned about making it reusable, you just have to implement
