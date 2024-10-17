@@ -49,12 +49,43 @@ def _pool_query_embeddings(query_embeddings: torch.Tensor, max_distance: float) 
     return torch.stack(pooled_embeddings)
 
 
+def bq(v: torch.Tensor) -> torch.Tensor:
+    """
+    Quantize float32 vectors to 64-bit packed binary vectors.
+
+    Args:
+        v: Input tensor of shape (..., n) where n is the length of each vector.
+
+    Returns:
+        Tensor of shape (..., ceil(n/64)) containing the binary quantized vectors.
+    """
+    # Create a binary mask: 1 where v > 0, 0 otherwise
+    binary_mask = (v > 0).to(torch.int64)
+
+    # Pad the last dimension to a multiple of 64
+    original_size = binary_mask.size(-1)
+    padding_size = (64 - original_size % 64) % 64
+    if padding_size > 0:
+        padding = torch.zeros((*binary_mask.shape[:-1], padding_size), dtype=torch.int64, device=v.device)
+        binary_mask = torch.cat([binary_mask, padding], dim=-1)
+
+    # Reshape to (..., ceil(n/64), 64)
+    binary_mask = binary_mask.view(*binary_mask.shape[:-1], -1, 64)
+
+    # Convert each group of 64 bits to a single int64
+    powers_of_two = 2 ** torch.arange(64, device=v.device).flip(0)
+    quantized = (binary_mask * powers_of_two).sum(dim=-1)
+
+    return quantized
+
+
 class ColbertLive:
     def __init__(self,
                  db: DB,
                  model: Model,
                  doc_pool_factor: int = 2,
-                 query_pool_distance: float = 0.03
+                 query_pool_distance: float = 0.03,
+                 quantize_to='float32'
                  ):
         """
         Initialize the ColbertLive instance.
@@ -67,6 +98,7 @@ class ColbertLive:
                 `None` to disable.
             query_pool_distance (optional): The maximum cosine distance across which to pool query embeddings.
                 `0.0` to disable.
+            quantize_to (optional): float32 or bits
 
             doc_pool_factor is only used by encode_chunks.
 
@@ -76,6 +108,9 @@ class ColbertLive:
         self.model = model
         self.doc_pool_factor = doc_pool_factor
         self.query_pool_distance = query_pool_distance
+        if quantize_to not in ['float32', 'bits']:
+            raise ValueError(f'Invalid quantize_to: {quantize_to}')
+        self.quantize_to = quantize_to
 
     def encode_query(self, q: str) -> torch.Tensor:
         """
@@ -128,17 +163,12 @@ class ColbertLive:
                 )
                 embeddings_list[i] = Di
 
+        if self.quantize_to == 'bits':
+            embeddings_list = [bq(Df32) for Df32 in embeddings_list]
         return embeddings_list
 
     def _load_data_and_construct_tensors(self, chunk_ids: list[Any]) -> list[torch.Tensor]:
-        all_embeddings = []
-
-        results = self.db.query_chunks(chunk_ids)
-        for embeddings_for_chunk in results:
-            packed_one_chunk = self.model.to_device(embeddings_for_chunk)
-            all_embeddings.append(packed_one_chunk)
-
-        return all_embeddings
+        return list(self.db.query_chunks(chunk_ids))
 
     MAX_LIMIT = 1000
 
@@ -171,7 +201,8 @@ class ColbertLive:
         Returns:
             list[tuple[Any, float]]: A list of tuples of (chunk_id, ColBERT score) for the top k chunks.
         """
-        Q = self.encode_query(query)
+        Qf32 = self.encode_query(query)
+        Q = Qf32 if self.quantize_to == 'float32' else bq(Qf32)
         return self._search(Q, k, n_ann_docs, n_maxsim_candidates, params)
 
     def _search(self, query_encodings, k, n_ann_docs, n_maxsim_candidates, params):

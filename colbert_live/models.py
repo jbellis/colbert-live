@@ -1,3 +1,4 @@
+import warnings
 from abc import ABC, abstractmethod
 
 import torch
@@ -5,12 +6,14 @@ from PIL.Image import Image
 from colbert import Checkpoint
 from colbert.indexing.collection_encoder import CollectionEncoder
 from colbert.infra import ColBERTConfig
-from colbert.modeling.colbert import ColBERT, colbert_score_packed
 from colpali_engine.models import ColPali, ColPaliProcessor, ColQwen2, ColQwen2Processor
 
-import warnings
-
 warnings.filterwarnings("ignore", category=FutureWarning, module="colbert.utils.amp")
+
+
+def hamming_distance(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+    xor = a ^ b
+    return torch.popcnt(xor).sum(dim=-1)
 
 
 class Model(ABC):
@@ -23,7 +26,7 @@ class Model(ABC):
             q: The query string to encode.
 
         Returns:
-            A 2D tensor of query embeddings.
+            A 2D float32 tensor of query embeddings.
             The tensor has shape (num_embeddings, embedding_dim), where num_embeddings is variable (one per token).
         """
         pass
@@ -37,7 +40,7 @@ class Model(ABC):
             chunks: A list of content strings to encode.
 
         Returns:
-            A list of 2D tensors of embeddings, one for each input chunk.
+            A list of 2D float32 tensors of embeddings, one for each input chunk.
             Each tensor has shape (num_embeddings, embedding_dim), where num_embeddings is variable (one per token).
         """
         pass
@@ -49,36 +52,45 @@ class Model(ABC):
         Args:
             Q: 2D Query embeddings tensor.
             D: list of 2D document embeddings tensors.
+        Note: Q and D may be int64 tensors representing binary-quantized embeddings, or float32 tensors.
+        Both must be one or the other.
 
         Returns:
-            A tensor of ColBERT scores.
+            A 1D float32 tensor of ColBERT scores.
         """
-        Q = self.to_device(Q.unsqueeze(0))  # Add batch dimension and move to device
-        D = [self.to_device(d.to(Q.dtype)) for d in D]  # Move passage embeddings to device
+        Q = Q.unsqueeze(0).cpu()  # Add batch dimension and move to device
+        D = [d.to(Q.dtype).cpu() for d in D]  # Move passage embeddings to device
 
-        # Pad the passage embeddings to the same length
-        D_padded = torch.nn.utils.rnn.pad_sequence(D, batch_first=True, padding_value=0)
+        if Q.dtype == torch.float32:
+            # Original float32 maxsim scoring method
+            D = [d.to(Q.dtype) for d in D]
+            D_padded = torch.nn.utils.rnn.pad_sequence(D, batch_first=True, padding_value=0)
+            scores = torch.einsum("bnd,csd->bcns", Q, D_padded).max(dim=3)[0].sum(dim=2)
+        elif Q.dtype == torch.int64:
+            # Binary-quantized scoring method using Hamming distance
+            max_doc_length = max(d.shape[0] for d in D)
+            D_padded = torch.zeros((len(D), max_doc_length, Q.shape[-1]), dtype=torch.int64)
+            for i, d in enumerate(D):
+                D_padded[i, :d.shape[0]] = d
 
-        # Compute scores using einsum
-        scores = torch.einsum("bnd,csd->bcns", Q, D_padded).max(dim=3)[0].sum(dim=2)
+            # Compute Hamming distances
+            distances = hamming_distance(Q.unsqueeze(1).unsqueeze(1), D_padded.unsqueeze(0))
+
+            # Convert distances to similarity scores (lower distance = higher similarity)
+            max_distance = Q.shape[-1] * 64  # Maximum possible Hamming distance (64 bits per int64)
+            similarities = max_distance - distances
+
+            # Aggregate similarities
+            scores = similarities.max(dim=3)[0].sum(dim=2)
+        else:
+            raise ValueError("Input tensors must be either float32 or int64")
 
         return scores.squeeze(0).to(torch.float32)  # Remove batch dimension and convert to float32
-
-    @abstractmethod
-    def to_device(self, T: torch.Tensor):
-        """
-        Copy a tensor to the device used by this model.  (Used when loading from the database.)
-        """
-        pass
 
     @property
     @abstractmethod
     def dim(self):
         pass
-
-
-def _get_module_device(module):
-    return next(module.parameters()).device
 
 
 class ColbertModel(Model):
@@ -105,15 +117,12 @@ class ColbertModel(Model):
 
         return embeddings_list
 
-    def to_device(self, T: torch.Tensor):
-        return T.to(_get_module_device(self.checkpoint))
-
     @property
     def dim(self):
         return self._dim
 
     def __str__(self):
-        return f"ColbertModel(model={self.colpali.model_name}, dim={self.dim}, device={_get_module_device(self.colpali)})"
+        return f"ColbertModel(config={self.config}, dim={self.dim})"
 
 
 class ColpaliModel(Model):
@@ -136,7 +145,7 @@ class ColpaliModel(Model):
     def encode_query(self, q: str) -> torch.Tensor:
         with torch.no_grad():
             batch = self.processor.process_queries([q])
-            batch = {k: self.to_device(v) for k, v in batch.items()}
+            batch = {k: v.cpu() for k, v in batch.items()}
             embeddings = self.colpali(**batch)
 
         return embeddings[0]
@@ -144,18 +153,15 @@ class ColpaliModel(Model):
     def encode_doc(self, images: list[Image]) -> list[torch.Tensor]:
         with torch.no_grad():
             batch = self.processor.process_images(images)
-            batch = {k: self.to_device(v) for k, v in batch.items()}
+            batch = {k: v.cpu() for k, v in batch.items()}
             raw_embeddings = self.colpali(**batch)
 
         # Discard zero vectors from the embeddings tensor
         return [emb[emb.norm(dim=-1) > 0] for emb in raw_embeddings]
-
-    def to_device(self, T: torch.Tensor):
-        return T.to(_get_module_device(self.colpali))
 
     @property
     def dim(self):
         return self.colpali.dim
 
     def __str__(self):
-        return f"ColpaliModel(model={self.colpali.model_name}, dim={self.dim}, device={_get_module_device(self.colpali)})"
+        return f"ColpaliModel(model={self.colpali.model_name}, dim={self.dim})"
