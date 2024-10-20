@@ -185,19 +185,19 @@ class ColbertLive:
         if n_maxsim_candidates is None:
             # f(1) = 9, f(10) = 20, f(100) = 119, f(900) = 1000
             n_maxsim_candidates = _expand(k, 8.82, 1.13, -0.00471)
-        # compute the max score for each term for each doc
-        chunks_per_query = {}
+
+        # Combine search results using RRF
+        rrf_k = 60  # A common default value for k in RRF (also tested 10 with inconclusive results)
+        rrf_scores = {}
         for n, rows in enumerate(self.db.query_ann(query_encodings, n_ann_docs, params)):
-            for chunk_id, similarity in rows:
-                key = (chunk_id, n)
-                chunks_per_query[key] = max(chunks_per_query.get(key, -1), similarity)
-        if not chunks_per_query:
-            return []  # empty database
-        # sum the partial scores and identify the top candidates
-        chunks = {}
-        for (chunk_id, qv), similarity in chunks_per_query.items():
-            chunks[chunk_id] = chunks.get(chunk_id, 0) + similarity
-        candidates = sorted(chunks, key=chunks.get, reverse=True)[:n_maxsim_candidates]
+            for rank, (chunk_id, _) in enumerate(rows, start=1):
+                rrf_scores[chunk_id] = rrf_scores.get(chunk_id, 0) + 1 / (rrf_k + rank)
+
+        # empty database?
+        if not rrf_scores:
+            return []
+        # Select top candidates based on RRF scores
+        candidates = sorted(rrf_scores, key=rrf_scores.get, reverse=True)[:n_maxsim_candidates]
         # Load document encodings
         doc_encodings = self._load_data_and_construct_tensors(candidates)
         # Calculate full ColBERT scores

@@ -115,7 +115,7 @@ class BenchDB(AstraCQL):
         """)
 
     def get_query_ann(self, embeddings: torch.Tensor, limit: int, params: dict[str, Any]) -> tuple[PreparedStatement, list[tuple]]:
-        params_list = [(emb, emb, limit) for emb in embeddings.tolist()]
+        params_list = [(emb, emb, limit) for emb in embeddings]
         return self.query_ann_stmt, params_list
 
     def get_query_chunks_stmt(self) -> PreparedStatement:
