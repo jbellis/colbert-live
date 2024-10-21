@@ -137,13 +137,15 @@ def test_all(datasets):
 
 if __name__ == "__main__":
     all_datasets = [
+        # "core" Q&A datasets that are a good fit for what colbert's designed for
         ('scifact', 48),
-        ('nfcorpus', 32),
-        ('scidocs', 48),
         ('trec-covid', 48),
-        ('fiqa', 32),
-        ('arguana', 64),
         ('quora', 32),
+        # other datasets
+        # ('nfcorpus', 32),
+        # ('scidocs', 48),
+        # ('fiqa', 32),
+        # ('arguana', 64),
     ]
 
     if len(sys.argv) > 1:
