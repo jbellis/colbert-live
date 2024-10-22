@@ -190,8 +190,11 @@ class ColbertLive:
         rrf_k = 60  # A common default value for k in RRF (also tested 10 with inconclusive results)
         rrf_scores = {}
         for n, rows in enumerate(self.db.query_ann(query_encodings, n_ann_docs, params)):
+            seen_chunks = set()
             for rank, (chunk_id, _) in enumerate(rows, start=1):
-                rrf_scores[chunk_id] = rrf_scores.get(chunk_id, 0) + 1 / (rrf_k + rank)
+                if chunk_id not in seen_chunks:
+                    rrf_scores[chunk_id] = rrf_scores.get(chunk_id, 0) + 1 / (rrf_k + rank)
+                    seen_chunks.add(chunk_id)
 
         # empty database?
         if not rrf_scores:
